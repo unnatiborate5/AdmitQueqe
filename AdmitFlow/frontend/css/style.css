@@ -1,0 +1,135 @@
+/* AdmitFlow student portal styles (on top of Bootstrap 5.3 CSS) */
+:root {
+  --af-ink: #1b2437;
+  --af-muted: #5d6779;
+  --af-line: #dfe4ec;
+  --af-bg: #f2f5f9;
+  --af-surface: #ffffff;
+  --af-brand: #0f5c78;
+  --af-brand-dark: #0b4860;
+  --af-done: #23805a;
+  --af-progress: #b87a05;
+  --af-pending: #8792a4;
+
+  --bs-primary: var(--af-brand);
+  --bs-primary-rgb: 15, 92, 120;
+  --bs-link-color: var(--af-brand);
+  --bs-link-color-rgb: 15, 92, 120;
+  --bs-link-hover-color: var(--af-brand-dark);
+  --bs-body-color: var(--af-ink);
+  --bs-body-bg: var(--af-bg);
+  --bs-body-font-family: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --bs-border-color: var(--af-line);
+}
+
+body { background: var(--af-bg); color: var(--af-ink); min-height: 100vh; }
+h1, h2, h3, h4, h5 { letter-spacing: -0.01em; }
+.text-muted { color: var(--af-muted) !important; }
+
+.btn-primary {
+  --bs-btn-bg: var(--af-brand);
+  --bs-btn-border-color: var(--af-brand);
+  --bs-btn-hover-bg: var(--af-brand-dark);
+  --bs-btn-hover-border-color: var(--af-brand-dark);
+  --bs-btn-active-bg: var(--af-brand-dark);
+  --bs-btn-active-border-color: var(--af-brand-dark);
+  --bs-btn-disabled-bg: var(--af-brand);
+  --bs-btn-disabled-border-color: var(--af-brand);
+}
+.btn-outline-primary {
+  --bs-btn-color: var(--af-brand);
+  --bs-btn-border-color: var(--af-brand);
+  --bs-btn-hover-bg: var(--af-brand);
+  --bs-btn-hover-border-color: var(--af-brand);
+  --bs-btn-active-bg: var(--af-brand-dark);
+}
+.form-control:focus, .form-select:focus, .btn:focus-visible {
+  border-color: var(--af-brand);
+  box-shadow: 0 0 0 0.25rem rgba(15, 92, 120, 0.2);
+}
+
+/* ---------- Header / navigation ---------- */
+.public-bar, .app-nav { background: var(--af-surface); border-bottom: 1px solid var(--af-line); }
+.public-bar .container, .app-nav .container { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.brand { font-weight: 800; font-size: 1.25rem; color: var(--af-ink); text-decoration: none; letter-spacing: -0.02em; }
+.brand:hover { color: var(--af-brand); }
+.brand-mark { color: var(--af-brand); }
+.app-nav .nav-link { color: var(--af-muted); font-weight: 600; padding: 0.4rem 0.75rem; border-radius: 0.5rem; }
+.app-nav .nav-link:hover { color: var(--af-ink); background: var(--af-bg); }
+.app-nav .nav-link.active { color: var(--af-brand); background: rgba(15, 92, 120, 0.09); }
+
+/* ---------- Surfaces ---------- */
+.panel { background: var(--af-surface); border: 1px solid var(--af-line); border-radius: 0.75rem; padding: 1.5rem; }
+.panel-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.25rem; }
+.page-title { font-size: 1.6rem; font-weight: 800; }
+
+/* ---------- Auth pages ---------- */
+.auth-wrap { max-width: 28rem; margin: 2.5rem auto; padding: 0 1rem; }
+.auth-wrap.wide { max-width: 34rem; }
+
+/* ---------- Landing ---------- */
+.hero { padding: 4rem 0 2.5rem; }
+.hero h1 { font-size: clamp(2rem, 4.5vw, 3.2rem); font-weight: 800; line-height: 1.1; max-width: 18ch; }
+.hero p.lead { color: var(--af-muted); max-width: 52ch; }
+.flow-list { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+.flow-list li { display: flex; gap: 1rem; padding: 0.9rem 0; border-top: 1px solid var(--af-line); }
+.flow-list li:first-child { border-top: 0; }
+.flow-list .step-no {
+  flex: 0 0 2rem; height: 2rem; border-radius: 50%; background: rgba(15, 92, 120, 0.1);
+  color: var(--af-brand); font-weight: 800; display: grid; place-items: center; font-size: 0.9rem;
+}
+
+/* ---------- Segmented progress bar (one segment per task) ---------- */
+.seg-bar { display: flex; gap: 6px; }
+.seg { flex: 1; height: 12px; border-radius: 6px; background: var(--af-line); }
+.seg.completed { background: var(--af-done); }
+.seg.in_progress { background: var(--af-progress); }
+.seg.pending { background: var(--af-line); }
+
+/* ---------- Status pills ---------- */
+.status-pill {
+  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
+  font-size: 0.8rem; font-weight: 700; white-space: nowrap;
+}
+.status-pill.completed { background: rgba(35, 128, 90, 0.12); color: var(--af-done); }
+.status-pill.in_progress { background: rgba(184, 122, 5, 0.14); color: var(--af-progress); }
+.status-pill.pending { background: rgba(135, 146, 164, 0.18); color: #4f596b; }
+
+/* ---------- Dashboard numbers ---------- */
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+.stat .num { font-size: 1.6rem; font-weight: 800; line-height: 1.1; }
+.stat .lbl { color: var(--af-muted); font-size: 0.85rem; }
+.stat.completed .num { color: var(--af-done); }
+.stat.in_progress .num { color: var(--af-progress); }
+@media (max-width: 575.98px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- Task timeline ---------- */
+.task-list { list-style: none; margin: 0; padding: 0; }
+.task-item { display: flex; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--af-line); }
+.task-item:first-child { border-top: 0; padding-top: 0.25rem; }
+.task-marker {
+  flex: 0 0 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center;
+  font-weight: 800; font-size: 0.9rem; border: 2px solid var(--af-pending); color: var(--af-pending); background: #fff;
+}
+.task-marker.completed { background: var(--af-done); border-color: var(--af-done); color: #fff; }
+.task-marker.in_progress { border-color: var(--af-progress); color: var(--af-progress); }
+.task-body { flex: 1; min-width: 0; }
+.task-title { font-weight: 700; }
+.task-desc { color: var(--af-muted); font-size: 0.92rem; margin: 0.1rem 0 0.4rem; }
+
+/* ---------- Checklist cards ---------- */
+.check-item { background: var(--af-surface); border: 1px solid var(--af-line); border-radius: 0.75rem; padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
+.check-item.completed { border-left: 5px solid var(--af-done); }
+.check-item.in_progress { border-left: 5px solid var(--af-progress); }
+.check-item.pending { border-left: 5px solid var(--af-pending); }
+.check-item .guidance { font-size: 0.9rem; color: var(--af-muted); background: var(--af-bg); border-radius: 0.5rem; padding: 0.6rem 0.8rem; }
+.manual-note { border-left: 4px solid var(--af-progress); background: rgba(184, 122, 5, 0.08); border-radius: 0.5rem; padding: 0.7rem 0.9rem; font-size: 0.92rem; }
+
+dl.cap-summary { margin: 0; }
+dl.cap-summary dt { font-weight: 600; color: var(--af-muted); font-size: 0.85rem; }
+dl.cap-summary dd { margin: 0 0 0.7rem; font-weight: 600; overflow-wrap: anywhere; }
+
+.spinner-wrap { padding: 4rem 0; text-align: center; color: var(--af-muted); }
+
+/* Fallback in case the Bootstrap CDN stylesheet fails to load */
+.d-none { display: none !important; }
