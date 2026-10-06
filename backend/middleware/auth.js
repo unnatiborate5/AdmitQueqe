@@ -40,4 +40,4 @@ function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { getSessionToken, setSessionCookie, clearSessionCookie, requireAuth };
+module.exports = { parseCookies, getSessionToken, setSessionCookie, clearSessionCookie, requireAuth };

@@ -242,6 +242,13 @@
         ${details.verifiedAt ? `<dt>Verified on</dt><dd>${esc(details.verifiedAt)}</dd>` : ''}
         ${details.remarks ? `<dt>Remarks</dt><dd>${esc(details.remarks)}</dd>` : ''}
       </dl>` : ''}
+      ${details.appointment ? `<div class="guidance mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-1"><strong>Your appointment</strong>${UI.statusPill(details.appointment.status, details.appointment.statusLabel)}</div>
+        <div>${esc(UI.formatDay(details.appointment.date))}, ${esc(UI.formatClock(details.appointment.time))}</div>
+        <div>${esc(details.appointment.venue)}</div>
+        ${details.appointment.instructions ? `<div class="pre-line mt-1">${esc(details.appointment.instructions)}</div>` : ''}
+        ${details.appointment.note ? `<div class="mt-1"><em>${esc(details.appointment.note)}</em></div>` : ''}
+      </div>` : ''}
       <h3 class="h6 fw-bold">What happens</h3>
       <ol class="small text-muted ps-3">${details.steps.map((s) => `<li class="mb-1">${esc(s)}</li>`).join('')}</ol>
       <div class="guidance d-flex flex-wrap justify-content-between align-items-center gap-2">

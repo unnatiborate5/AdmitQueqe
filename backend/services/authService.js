@@ -84,4 +84,4 @@ function destroySession(token) {
   if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
 }
 
-module.exports = { SESSION_TTL_MS, register, login, getStudentBySession, destroySession };
+module.exports = { SESSION_TTL_MS, register, login, getStudentBySession, destroySession, hashPassword, verifyPassword };

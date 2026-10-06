@@ -180,3 +180,27 @@ body.af-modal-open { overflow: hidden; }
 /* Fallbacks if the Bootstrap CDN stylesheet fails to load */
 .btn-close { background: none; border: 0; font-size: 1.4rem; line-height: 1; cursor: pointer; }
 .btn-close::before { content: "\00d7"; }
+
+/* ---------- Phase 3: college review + appointment statuses (shared by student and admin pages) ---------- */
+.status-pill.approved, .status-pill.scheduled { background: rgba(35, 128, 90, 0.12); color: var(--af-done); }
+.status-pill.rejected, .status-pill.missed { background: rgba(190, 52, 52, 0.12); color: #a52a2a; }
+.status-pill.correction_requested { background: rgba(184, 122, 5, 0.14); color: var(--af-progress); }
+.status-pill.not_started, .status-pill.cancelled { background: rgba(135, 146, 164, 0.18); color: #4f596b; }
+.status-pill.scheduled { background: rgba(15, 92, 120, 0.12); color: var(--af-brand); }
+.review-history { list-style: none; margin: 0; padding: 0; font-size: 0.88rem; }
+.review-history li { padding: 0.45rem 0; border-top: 1px solid var(--af-line); }
+.review-history li:first-child { border-top: 0; }
+.pre-line { white-space: pre-line; overflow-wrap: anywhere; }
+
+/* ---------- Phase 4: queue token (student dashboard and admin queue page) ---------- */
+.status-pill.waiting { background: rgba(184, 122, 5, 0.14); color: var(--af-progress); }
+.status-pill.called { background: rgba(91, 75, 196, 0.14); color: #5b4bc4; }
+.status-pill.serving { background: rgba(15, 92, 120, 0.12); color: var(--af-brand); }
+.status-pill.no_show { background: rgba(190, 52, 52, 0.12); color: #a52a2a; }
+.status-pill.expired { background: rgba(135, 146, 164, 0.18); color: #4f596b; }
+.token-card { text-align: center; }
+.token-code { font-size: 2.6rem; font-weight: 800; letter-spacing: 0.06em; line-height: 1.1; color: var(--af-ink); font-variant-numeric: tabular-nums; }
+.token-card.called { border-left: 5px solid #5b4bc4; }
+.token-card.called .token-code { color: #5b4bc4; }
+.token-position { font-size: 1.05rem; font-weight: 700; }
+.priority-tag { display: inline-block; background: rgba(184, 122, 5, 0.14); color: var(--af-progress); font-size: 0.75rem; font-weight: 800; padding: 0.12rem 0.55rem; border-radius: 999px; }

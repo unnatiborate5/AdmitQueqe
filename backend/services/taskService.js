@@ -9,6 +9,7 @@ const checklistService = require('./checklistService');
 const documentService = require('./documentService');
 const verificationService = require('./verificationService');
 const feeService = require('./feeService');
+const appointmentService = require('./appointmentService');
 const {
   assertValid, validateStatusRecord, validateDocuments, validateFee,
 } = require('../utils/validators');
@@ -54,6 +55,7 @@ function getTask(studentId, key) {
         remarks: v.remarks,
         documentsPrepared: s.preparedRequired,
         documentsRequired: s.requiredTotal,
+        appointment: appointmentService.getStudentView(studentId),
         steps: [
           'Prepare your original documents and photocopies (see Document Preparation).',
           'Visit your college on the date and time announced in its admission notice.',

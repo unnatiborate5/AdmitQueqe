@@ -1,12 +1,17 @@
 {
   "name": "admitflow-backend",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "AdmitFlow - Post-CAP College Admission Coordination & Queue Management System (backend)",
   "main": "server.js",
   "scripts": {
+    "build:engine": "node scripts/buildEngine.js",
+    "prestart": "node scripts/buildEngine.js",
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test"
+    "pretest": "node scripts/buildEngine.js",
+    "test": "node --test",
+    "create-admin": "node scripts/createAdmin.js",
+    "seed:demo": "node scripts/seedDemo.js"
   },
   "engines": {
     "node": ">=20"

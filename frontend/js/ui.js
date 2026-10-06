@@ -72,5 +72,19 @@
     return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
-  window.UI = { esc, showAlert, showAlertIn, clearAlert, clearFieldErrors, setFieldErrors, setLoading, segmentedBar, statusPill, formatDate };
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  /** 'YYYY-MM-DD' -> '12 Sep 2026' (no time-zone conversion, so the day never shifts). */
+  function formatDay(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : '';
+  }
+  /** 'HH:MM' (24h) -> '3:15 PM'. */
+  function formatClock(hhmm) {
+    const m = /^(\d{2}):(\d{2})$/.exec(String(hhmm || ''));
+    if (!m) return '';
+    const h = Number(m[1]);
+    return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
+  }
+
+  window.UI = { formatDay, formatClock, esc, showAlert, showAlertIn, clearAlert, clearFieldErrors, setFieldErrors, setLoading, segmentedBar, statusPill, formatDate };
 })();

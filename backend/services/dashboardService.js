@@ -1,6 +1,8 @@
 'use strict';
 const capService = require('./capService');
 const checklistService = require('./checklistService');
+const applicationService = require('./applicationService');
+const appointmentService = require('./appointmentService');
 
 /** CAP details count as the first task; the 5 checklist items follow. */
 function buildTasks(studentId) {
@@ -46,9 +48,15 @@ function getSummary(student) {
   const progress = computeProgress(tasks);
   const cancelled = cap && cap.allotmentStatus === capService.CANCELLED_STATUS;
 
+  // The college's decision (set in the admin portal) takes priority over the student's own progress.
+  const application = cap ? applicationService.getStudentView(student.id) : null;
+
   let overallStatus = 'In Progress';
   if (!cap) overallStatus = 'Getting Started';
   else if (cancelled) overallStatus = 'Seat Cancelled';
+  else if (application.status === 'rejected') overallStatus = 'Application Rejected';
+  else if (application.status === 'correction_requested') overallStatus = 'Corrections Requested';
+  else if (application.status === 'approved') overallStatus = 'Admission Approved';
   else if (progress.completed === progress.total) overallStatus = 'Admission Process Complete';
 
   return {
@@ -56,6 +64,8 @@ function getSummary(student) {
     cap,
     progress,
     tasks,
+    application,
+    appointment: cap ? appointmentService.getStudentView(student.id) : null,
     nextStep: tasks.find((t) => t.status !== 'completed') || null,
     overallStatus,
     warning: cancelled

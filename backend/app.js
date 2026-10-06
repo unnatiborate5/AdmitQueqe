@@ -3,6 +3,7 @@ const path = require('path');
 const express = require('express');
 const routes = require('./routes');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
+const { adminPageGuard } = require('./middleware/adminAuth');
 
 const app = express();
 app.disable('x-powered-by');
@@ -17,6 +18,9 @@ app.use('/api', (req, res, next) => {
 });
 app.use('/api', routes);
 app.use('/api', notFound);
+
+// Admin pages: everything except the login page needs an admin session (redirects to the login page).
+app.use('/admin', adminPageGuard);
 
 // Frontend (static pages).
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
