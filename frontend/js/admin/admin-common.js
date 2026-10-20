@@ -4,13 +4,14 @@
   const NAV = [
     ['dashboard.html', 'Dashboard', 'dashboard:view'],
     ['students.html', 'Students', 'students:view'],
+    ['progress-queue.html', 'Progress queue', 'queue:view'],
     ['appointments.html', 'Appointments', 'students:view'],
     ['cap-records.html', 'CAP records', 'cap:view'],
     ['queue.html', 'Queue', 'queue:view'],
     ['planner.html', 'Planner', 'students:view'],
     ['activity.html', 'Activity', 'activity:view'],
   ];
-  const SAFE_NEXT = ['dashboard.html', 'students.html', 'student.html', 'appointments.html', 'queue.html', 'planner.html', 'cap-records.html', 'activity.html'];
+  const SAFE_NEXT = ['dashboard.html', 'students.html', 'student.html', 'progress-queue.html', 'appointments.html', 'queue.html', 'planner.html', 'cap-records.html', 'activity.html'];
 
   const REVIEW_LABELS = { pending: 'Pending Review', approved: 'Approved', rejected: 'Rejected', correction_requested: 'Corrections Requested', not_started: 'Not Started' };
   const VERIF_LABELS = { pending: 'Not Verified', in_progress: 'In Progress', completed: 'Verified' };
@@ -78,7 +79,7 @@
         if (mine !== n) return;
         box.innerHTML = (d.results.length ? d.results.map((r) => `<a class="search-hit-row" href="student.html?id=${r.id}">
             <div class="d-flex justify-content-between gap-2"><span class="fw-semibold">${esc(r.name)}</span>${reviewPill(r.reviewStatus)}</div>
-            <div class="small text-muted">${esc(r.applicationId || 'No application yet')}${r.token ? ` &middot; token <strong>${esc(r.token)}</strong>` : ''} &middot; matched by ${esc(r.matchedBy.join(', ').toLowerCase())}</div></a>`).join('')
+            <div class="small text-muted">${esc(r.applicationId || 'No application yet')}${r.admissionToken ? ` &middot; token <span class="badge bg-primary">${esc(r.admissionToken)}</span>` : ''}${r.token ? ` &middot; queue ticket <strong>${esc(r.token)}</strong>` : ''} &middot; matched by ${esc(r.matchedBy.join(', ').toLowerCase())}</div></a>`).join('')
           : '<div class="p-3 text-muted small">No student, application ID or token matches.</div>')
           + (d.truncated ? `<div class="search-meta">Showing the first ${d.results.length} of ${d.total}. Type more to narrow it down.</div>` : '')
           + `<div class="search-meta">${esc(algoText(d.algorithms))}</div>`;

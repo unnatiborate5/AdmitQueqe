@@ -26,6 +26,8 @@
          </div>`
       : '';
 
+    const admissionToken = (c && c.admissionToken) || (data && data.admissionToken) || (student && student.admissionToken) || null;
+
     root.innerHTML = `
       <section class="panel">
         <div class="d-flex justify-content-between align-items-center mb-3">
@@ -33,6 +35,7 @@
           ${statusBadge}
         </div>
         <dl class="cap-summary mb-3">
+          ${admissionToken ? `<dt>Permanent Admission Token</dt><dd><span class="badge bg-primary fs-6" id="cap-details-admission-token">${esc(admissionToken)}</span></dd>` : ''}
           <dt>Application ID</dt><dd class="fw-semibold">${esc(c.applicationId)}</dd>
           <dt>Candidate Name</dt><dd>${esc(c.studentName)}</dd>
           <dt>Allotted College</dt><dd>${esc(c.allottedCollege)}</dd>

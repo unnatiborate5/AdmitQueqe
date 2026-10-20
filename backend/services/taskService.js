@@ -167,6 +167,8 @@ function saveTask(studentId, key, body) {
       checklistService.saveRecord(studentId, key, { eventDate: null, note: note || null });
       workflow.studentMove(studentId, key, 'pending_review');
     })();
+    const admissionProgressQueueService = require('./admissionProgressQueueService');
+    admissionProgressQueueService.handleTaskUpdate(studentId, db);
     return getTask(studentId, key);
   }
 
@@ -216,12 +218,16 @@ function saveTask(studentId, key, body) {
     })();
   }
 
+  const admissionProgressQueueService = require('./admissionProgressQueueService');
+  admissionProgressQueueService.handleTaskUpdate(studentId, db);
   return getTask(studentId, key);
 }
 
 function reviewTask(admin, studentId, key, body) {
   requireKnownTask(key);
   const result = workflow.officerReview(admin, studentId, key, body || {});
+  const admissionProgressQueueService = require('./admissionProgressQueueService');
+  admissionProgressQueueService.handleTaskUpdate(studentId, db);
   return { review: result, ...getTask(studentId, key) };
 }
 

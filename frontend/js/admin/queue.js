@@ -80,6 +80,7 @@
         <div><h1 class="page-title mb-1">Verification queue</h1>
           <p class="text-muted mb-0" id="q-sub"></p></div>
         <div class="d-flex gap-2">
+          <a href="progress-queue.html" class="btn btn-outline-info">Admission Progress Queue &rarr;</a>
           ${canConfigure ? '<button type="button" class="btn btn-outline-primary" data-act="add-counter">Add counter</button>' : ''}
           <button type="button" class="btn btn-outline-primary" data-act="refresh">Refresh</button></div>
       </div>

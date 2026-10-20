@@ -66,13 +66,22 @@ function getSummary(student) {
   else if (application.status === 'approved') overallStatus = 'Admission Approved';
   else if (progress.completed === progress.total) overallStatus = 'Admission Process Complete';
 
+  let admissionToken = student.admissionToken || (cap && cap.admissionToken) || null;
+  if (!admissionToken && cap) {
+    const admissionTokenService = require('./admissionTokenService');
+    const db = require('../config/db');
+    admissionToken = admissionTokenService.allocateAdmissionToken(student.id, db);
+  }
+
   return {
     student: {
       id: student.id,
       fullName: student.fullName,
       applicationId: student.applicationId || (cap && cap.applicationId) || (verification && verification.applicationId) || null,
+      admissionToken,
       email: student.email,
     },
+    admissionToken,
     cap,
     capVerification: verification,
     progress,

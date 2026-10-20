@@ -361,6 +361,121 @@ TEST(toolkit_protocol_runs_all_phase5_commands_and_still_serves_the_queue) {
   run("QUIT"); CHECK(quit);
 }
 
+// ================================ ADMISSION PROGRESS QUEUE (MAX-HEAP) ================================
+TEST(admission_progress_heap_max_priority_and_fifo_tie_breaking) {
+  AdmissionProgressHeap h;
+  CHECK(h.empty() && h.size() == 0);
+  CHECK(h.peek() == nullptr);
+
+  // Student 1: score 0.5000, entered 10:00
+  h.upsert(1, "AF-001", 0.5000, "2026-08-15 10:00:00");
+  // Student 2: score 0.8500, entered 11:00 (higher score)
+  h.upsert(2, "AF-002", 0.8500, "2026-08-15 11:00:00");
+  // Student 3: score 0.5000, entered 09:30 (same score as #1, but earlier entry -> FIFO winner)
+  h.upsert(3, "AF-003", 0.5000, "2026-08-15 09:30:00");
+  // Student 4: score 0.5000, entered 10:00 (same score, same timestamp as #1 -> smaller ID winner)
+  h.upsert(4, "AF-004", 0.5000, "2026-08-15 10:00:00");
+
+  CHECK(h.size() == 4);
+  CHECK(h.peek() != nullptr && h.peek()->studentId == 2);
+
+  auto ranked = h.getRanked();
+  CHECK(ranked.size() == 4);
+  CHECK(ranked[0].studentId == 2);   // 0.8500
+  CHECK(ranked[1].studentId == 3);   // 0.5000, 09:30
+  CHECK(ranked[2].studentId == 1);   // 0.5000, 10:00, id 1
+  CHECK(ranked[3].studentId == 4);   // 0.5000, 10:00, id 4
+}
+
+TEST(admission_progress_heap_priority_updates_and_completion_removal) {
+  AdmissionProgressHeap h;
+  h.upsert(1, "AF-001", 0.4000, "2026-08-15 10:00:00");
+  h.upsert(2, "AF-002", 0.6000, "2026-08-15 10:00:00");
+  h.upsert(3, "AF-003", 0.8000, "2026-08-15 10:00:00");
+
+  CHECK(h.peek()->studentId == 3);
+
+  // Update student 1's score to 0.9500 (e.g. deadline closer or tasks approved) -> moves to position 1
+  h.upsert(1, "AF-001", 0.9500, "2026-08-15 10:00:00");
+  CHECK(h.peek()->studentId == 1);
+  auto r1 = h.getRanked();
+  CHECK(r1.size() == 3 && r1[0].studentId == 1 && r1[1].studentId == 3 && r1[2].studentId == 2);
+
+  // Remove student 1 upon 6/6 tasks approved
+  CHECK(h.remove(1));
+  CHECK(!h.contains(1));
+  CHECK(h.size() == 2);
+  CHECK(h.peek()->studentId == 3);
+  auto r2 = h.getRanked();
+  CHECK(r2.size() == 2 && r2[0].studentId == 3 && r2[1].studentId == 2);
+
+  // Removing non-existent or already removed returns false
+  CHECK(!h.remove(1));
+  CHECK(!h.remove(999));
+
+  // Re-inserting student 1 (e.g. if task corrected and status reverted to active)
+  h.upsert(1, "AF-001", 0.3000, "2026-08-15 10:00:00");
+  CHECK(h.size() == 3);
+  auto r3 = h.getRanked();
+  CHECK(r3.size() == 3 && r3[0].studentId == 3 && r3[1].studentId == 2 && r3[2].studentId == 1);
+}
+
+TEST(admission_progress_heap_regression_rohan_joshi_vs_sneha_patil) {
+  // Regression test: Rohan Joshi (score 0.5191) MUST rank before Sneha Patil (score 0.4524)
+  // regardless of insertion order, student IDs (Sneha ID 3 vs Rohan ID 4), or timestamps.
+  AdmissionProgressHeap h;
+  // Insert Sneha first with lower score 0.4524, earlier timestamp, smaller student ID (3)
+  h.upsert(3, "AF-003", 0.4524, "2026-08-15 08:00:00");
+  // Insert Rohan second with higher score 0.5191, later timestamp, larger student ID (4)
+  h.upsert(4, "AF-004", 0.5191, "2026-08-15 09:00:00");
+
+  CHECK(h.peek() != nullptr);
+  CHECK(h.peek()->studentId == 4); // Rohan Joshi must be at top
+
+  auto ranked = h.getRanked();
+  CHECK(ranked.size() == 2);
+  CHECK(ranked[0].studentId == 4); // Position 1: Rohan Joshi
+  CHECK(std::abs(ranked[0].score - 0.5191) < 1e-4);
+
+  CHECK(ranked[1].studentId == 3); // Position 2: Sneha Patil
+  CHECK(std::abs(ranked[1].score - 0.4524) < 1e-4);
+}
+
+TEST(toolkit_protocol_progress_commands) {
+  Toolkit tk(3);
+  bool quit = false;
+  auto run = [&](const std::string& l) { return handleToolkitLine(tk, l, quit); };
+  auto has = [](const std::string& s, const char* t) { return s.find(t) != std::string::npos; };
+
+  CHECK(has(run("PROGRESS_CLEAR"), "\"ok\":true"));
+  CHECK(has(run("PROGRESS_SIZE"), "\"size\":0"));
+  CHECK(has(run("PROGRESS_PEEK"), "\"hasStudent\":false"));
+
+  // Batch load
+  CHECK(has(run("PROGRESS_LOAD 3 10|AF-010|0.5000|2026-08-15~10:00:00 20|AF-020|0.7500|2026-08-15~09:00:00 30|AF-030|0.7500|2026-08-15~08:30:00"), "\"loaded\":3"));
+  CHECK(has(run("PROGRESS_SIZE"), "\"size\":3"));
+
+  // PROGRESS_RANK must have: student 30 (pos 1, earlier time), student 20 (pos 2), student 10 (pos 3)
+  std::string rankRep = run("PROGRESS_RANK");
+  CHECK(has(rankRep, "\"ok\":true"));
+  CHECK(has(rankRep, "\"position\":1,\"studentId\":30"));
+  CHECK(has(rankRep, "\"position\":2,\"studentId\":20"));
+  CHECK(has(rankRep, "\"position\":3,\"studentId\":10"));
+
+  // Upsert student 10 with top score 0.9500
+  CHECK(has(run("PROGRESS_UPSERT 10 AF-010 0.9500 2026-08-15~10:00:00"), "\"studentId\":10"));
+  CHECK(has(run("PROGRESS_PEEK"), "\"studentId\":10"));
+
+  // Remove student 10
+  CHECK(has(run("PROGRESS_REMOVE 10"), "\"removed\":true"));
+  CHECK(has(run("PROGRESS_SIZE"), "\"size\":2"));
+  CHECK(has(run("PROGRESS_PEEK"), "\"studentId\":30"));
+
+  // Clear
+  CHECK(has(run("PROGRESS_CLEAR"), "\"ok\":true"));
+  CHECK(has(run("PROGRESS_SIZE"), "\"size\":0"));
+}
+
 int main() {
   for (auto& t : registry()) {
     int before = g_failed;

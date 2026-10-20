@@ -99,6 +99,8 @@ function schedule(admin, v) {
       summary: `Scheduled verification for ${student.fullName} (${applicationId}) on ${v.date} at ${v.time}, ${v.venue}`,
       details: { appointmentId: Number(id), date: v.date, time: v.time, venue: v.venue },
     });
+    const admissionProgressQueueService = require('./admissionProgressQueueService');
+    admissionProgressQueueService.handleDeadlineUpdate(v.studentId, db);
     return toDto(requireAppointment(Number(id)));
   })();
 }
@@ -124,6 +126,8 @@ function reschedule(admin, id, v) {
       summary: `Rescheduled verification for ${student.fullName} from ${slot(old)} to ${v.date} ${v.time}`,
       details: { appointmentId: id, from: { date: old.appointment_date, time: old.appointment_time, venue: old.venue }, to: { date: v.date, time: v.time, venue: v.venue }, reason: v.reason },
     });
+    const admissionProgressQueueService = require('./admissionProgressQueueService');
+    admissionProgressQueueService.handleDeadlineUpdate(old.student_id, db);
     return toDto(requireAppointment(id));
   })();
 }
@@ -150,6 +154,8 @@ function revertReschedule(admin, id, before, after) {
       summary: `Undid the reschedule for ${student.fullName}: back to ${before.date} ${before.time}`,
       details: { appointmentId: id, from: { date: after.date, time: after.time, venue: after.venue }, to: { date: before.date, time: before.time, venue: before.venue } },
     });
+    const admissionProgressQueueService = require('./admissionProgressQueueService');
+    admissionProgressQueueService.handleDeadlineUpdate(row.student_id, db);
     return toDto(requireAppointment(id));
   })();
 }
@@ -173,6 +179,8 @@ function updateStatus(admin, id, { status, note }) {
       summary: `Marked the ${slot(old)} verification appointment of ${student.fullName} as ${status}`,
       details: { appointmentId: id, from: 'scheduled', to: status, note },
     });
+    const admissionProgressQueueService = require('./admissionProgressQueueService');
+    admissionProgressQueueService.handleDeadlineUpdate(old.student_id, db);
     return toDto(requireAppointment(id));
   })();
 }

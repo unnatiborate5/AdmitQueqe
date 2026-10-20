@@ -75,10 +75,10 @@
     if (!d.hasApplication || !d.queue) return '';
     const q = d.queue;
     const canOperate = Admin.can(admin, 'queue:operate');
-    return `<section class="panel mb-4" aria-label="Queue token">
-      <h2 class="panel-title mb-2">Today's queue token</h2>
+    return `<section class="panel mb-4" aria-label="Physical-verification queue ticket">
+      <h2 class="panel-title mb-2">Today's physical-verification queue ticket</h2>
       ${q.tokens.length ? `<ul class="review-history">${q.tokens.map((t) => `<li class="d-flex flex-wrap justify-content-between gap-2"><span><span class="code-chip">${esc(t.code)}</span> ${t.counter ? `<span class="text-muted">&middot; ${esc(t.counter.name)}</span>` : ''}${t.finishReason ? `<span class="d-block text-muted small">${esc(t.finishReason)}</span>` : ''}</span>${Admin.tokenPill(t.status)}</li>`).join('')}</ul>`
-    : '<p class="text-muted small mb-2">No token issued today.</p>'}
+    : '<p class="text-muted small mb-2">No verification queue ticket issued today.</p>'}
       ${canOperate && q.canCheckIn ? '<button type="button" class="btn btn-primary btn-sm mt-2" data-act="check-in">Check in and issue token</button>'
     : (q.checkInProblem && !q.tokens.some((t) => ['waiting', 'called', 'serving'].includes(t.status)) ? `<p class="small text-muted mt-2 mb-0">${esc(q.checkInProblem)}</p>` : '')}
       <a class="small d-inline-block mt-2" href="queue.html">Open the queue</a>
@@ -106,9 +106,10 @@
     const waiting = !c && v.pendingClaim
       ? `<p class="mb-1"><span class="status-pill in_progress">Verification pending</span></p><p class="mb-0">The student submitted application ID <strong>${esc(v.pendingClaim.applicationId)}</strong>. ${esc(v.pendingClaim.reasonLabel)}. Resolve it on the <a href="cap-records.html?tab=claims">CAP records</a> page.</p>`
       : '<p class="text-muted mb-0">The student has not submitted a CAP application ID yet, or it is not linked to a verified record.</p>';
+    const admissionToken = (d.student && d.student.admissionToken) || (c && c.admissionToken) || null;
     return `<section class="panel mb-4" aria-label="CAP details">
       <h2 class="panel-title mb-2">CAP application</h2>
-      ${c ? `<dl class="detail-grid mb-0">${dd('Application ID', c.applicationId)}${dd('Name on the CAP list', c.studentName)}${dd('Allotted college', c.allottedCollege)}${dd('Course / branch', c.courseBranch)}${dd('CAP round', c.capRound)}${dd('Allotment status', c.allotmentStatus)}${dd('Last updated', UI.formatDate(c.updatedAt))}</dl>${verification}` : waiting}
+      ${c ? `<dl class="detail-grid mb-0">${admissionToken ? dd('Permanent Admission Token', admissionToken) : ''}${dd('Application ID', c.applicationId)}${dd('Name on the CAP list', c.studentName)}${dd('Allotted college', c.allottedCollege)}${dd('Course / branch', c.courseBranch)}${dd('CAP round', c.capRound)}${dd('Allotment status', c.allotmentStatus)}${dd('Last updated', UI.formatDate(c.updatedAt))}</dl>${verification}` : waiting}
     </section>`;
   }
 
@@ -119,7 +120,7 @@
     return `<section class="panel mb-4" aria-label="Admission progress">
       <div class="d-flex justify-content-between align-items-baseline mb-2"><h2 class="panel-title mb-0">Admission progress</h2><span class="fw-bold">${d.progress.completed} of ${d.progress.total} tasks complete</span></div>
       ${UI.segmentedBar(d.tasks.map((t) => t.status))}
-      <ul class="review-history mt-2">${d.tasks.map((t) => `<li class="d-flex flex-wrap justify-content-between gap-2"><span><span class="fw-semibold">${esc(t.title)}</span>${t.summary ? `<span class="d-block text-muted">${esc(t.summary)}</span>` : ''}${t.correctionReason ? `<span class="d-block text-warning small">Correction: ${esc(t.correctionReason)}</span>` : ''}${t.files.length ? `<span class="d-block small">${t.files.map((f) => `<a href="/api/admin/students/${d.student.id}/tasks/${encodeURIComponent(t.key)}/uploads/${f.id}">${esc(f.originalName)}</a>`).join(', ')}</span>` : ''}</span><span>${UI.statusPill(t.status, t.statusLabel)}${canReview && ['submitted', 'pending_review'].includes(t.status) ? `<button class="btn btn-sm btn-outline-primary ms-2" data-act="task-review" data-task="${esc(t.key)}">Review</button>` : ''}</span></li>`).join('')}</ul>
+      <ul class="review-history mt-2">${d.tasks.map((t) => `<li class="d-flex flex-wrap justify-content-between gap-2"><span><span class="fw-semibold">${esc(t.title)}</span>${t.summary ? `<span class="d-block text-muted">${esc(t.summary)}</span>` : ''}${t.correctionReason ? `<span class="d-block text-warning small">Correction: ${esc(t.correctionReason)}</span>` : ''}${t.files.length ? `<span class="d-block small">${t.files.map((f) => `<a href="/api/admin/students/${d.student.id}/tasks/${encodeURIComponent(t.key)}/uploads/${f.id}">${esc(f.originalName)}</a>`).join(', ')}</span>` : ''}</span><span>${UI.statusPill(t.status, t.statusLabel)}${canReview && t.key !== 'cap_details' && ['submitted', 'pending_review'].includes(t.status) ? `<button class="btn btn-sm btn-outline-primary ms-2" data-act="task-review" data-task="${esc(t.key)}">Review</button>` : (canReview && t.key !== 'cap_details' && t.status === 'approved' ? `<button class="btn btn-sm btn-outline-secondary ms-2" data-act="task-review" data-task="${esc(t.key)}" title="Request corrections if needed">Request Correction</button>` : '')}</span></li>`).join('')}</ul>
       ${(rec.allotmentAcceptance.note || rec.admissionForm.note) ? `<div class="small mt-2">${rec.allotmentAcceptance.note ? `<div><strong>Acceptance note:</strong> ${esc(rec.allotmentAcceptance.note)}</div>` : ''}${rec.admissionForm.note ? `<div><strong>Admission form note:</strong> ${esc(rec.admissionForm.note)}</div>` : ''}</div>` : ''}
     </section>
     <section class="panel mb-4" aria-label="Documents">
@@ -133,21 +134,59 @@
     </section>`;
   }
 
+  function panelAdmissionProgressQueue(d) {
+    if (!d.hasApplication || !d.progressQueue) return '';
+    const pq = d.progressQueue;
+    const isCompleted = pq.status === 'completed';
+    const statusText = isCompleted ? 'Completed' : 'Active';
+    const posText = (!isCompleted && pq.position !== undefined && pq.position !== null && !Number.isNaN(Number(pq.position)))
+      ? `#${pq.position}`
+      : '-';
+    const scoreText = (pq.priorityScore !== undefined && pq.priorityScore !== null)
+      ? pq.priorityScore.toFixed(4)
+      : '-';
+    const roundText = pq.capRound || (d.cap ? d.cap.capRound : '-');
+    const deadlineText = pq.deadline ? UI.formatDay(pq.deadline) : 'Unavailable';
+    const approvedText = `${pq.approvedCount !== undefined ? pq.approvedCount : 0}/6`;
+    const submittedText = `${pq.submittedCount !== undefined ? pq.submittedCount : 0}/6`;
+
+    return `<section class="panel mb-4" aria-label="Admission Progress Queue">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2 class="panel-title mb-0">Admission Progress Queue</h2>
+        ${isCompleted ? '<span class="status-pill completed">Completed</span>' : '<span class="status-pill in_progress">Active in Queue</span>'}
+      </div>
+      <dl class="cap-summary mb-2">
+        ${dd('Queue status', statusText)}
+        ${dd('Position', posText)}
+        ${dd('Priority score', scoreText)}
+        ${dd('CAP round', roundText)}
+        ${dd('Institute reporting deadline', deadlineText)}
+        ${dd('Approved tasks', approvedText)}
+        ${dd('Submitted tasks', submittedText)}
+      </dl>
+      <a class="small d-inline-block mt-2" href="progress-queue.html">Open Admission Progress Queue &rarr;</a>
+    </section>`;
+  }
+
+  const panelProgressQueue = panelAdmissionProgressQueue;
+
   function render(d) {
     data = d;
     const s = d.student;
+    const admissionToken = s.admissionToken || (d.cap && d.cap.admissionToken) || null;
     document.title = `${s.fullName} - AdmitFlow Admin`;
     root.innerHTML = `
       <a href="students.html" class="small text-decoration-none">&larr; All students</a>
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mt-2 mb-4">
         <div><h1 class="page-title mb-1">${esc(s.fullName)}</h1>
-          <p class="text-muted mb-0">${esc(s.email)} &middot; ${esc(s.phone)} &middot; registered ${esc(UI.formatDate(s.registeredAt))}</p></div>
+          <p class="text-muted mb-0">${esc(s.email)} &middot; ${esc(s.phone)} &middot; registered ${esc(UI.formatDate(s.registeredAt))}
+          ${admissionToken ? ` &middot; Permanent Admission Token: <span class="badge bg-primary fs-6 ms-1" id="admin-student-admission-token">${esc(admissionToken)}</span>` : ''}</p></div>
         <div>${Admin.reviewPill(d.review.status)}</div>
       </div>
       ${d.review.status === 'approved' && d.verification.status !== 'completed' ? '<div class="alert alert-warning">This application is approved but physical verification has not been recorded as completed.</div>' : ''}
       <div class="row g-4">
         <div class="col-lg-7">${panelCap(d)}${panelTasks(d)}</div>
-        <div class="col-lg-5">${panelActions(d)}${panelReview(d)}${panelVerification(d)}${panelQueue(d)}${panelHistory(d)}</div>
+        <div class="col-lg-5">${panelActions(d)}${panelAdmissionProgressQueue(d)}${panelReview(d)}${panelVerification(d)}${panelQueue(d)}${panelHistory(d)}</div>
       </div>`;
   }
 
@@ -223,18 +262,32 @@
   function openTaskReview(key) {
     const task = data.tasks.find((t) => t.key === key);
     if (!task) return;
+    const isApproved = task.status === 'approved';
     const m = Modal.open({ title: `Review: ${task.title}` });
     m.body.innerHTML = `<form id="task-review-form" novalidate><p>Current status: ${UI.statusPill(task.status, task.statusLabel)}</p>
-      <fieldset class="mb-3"><legend class="doc-legend">Decision</legend><label class="review-choice"><input type="radio" name="action" value="approve" checked><span><span class="t">Approve</span><span class="d">Mark this task approved.</span></span></label><label class="review-choice"><input type="radio" name="action" value="request_corrections"><span><span class="t">Request corrections</span><span class="d">Return the task to the student with a required reason.</span></span></label></fieldset>
-      <div><label class="form-label fw-semibold" for="task-remarks">Correction reason</label><textarea class="form-control" id="task-remarks" name="remarks" rows="3" maxlength="1000"></textarea><div class="invalid-feedback"></div></div></form>`;
+      <fieldset class="mb-3"><legend class="doc-legend">Decision</legend>
+        ${!isApproved ? '<label class="review-choice"><input type="radio" name="action" value="approve" checked><span><span class="t">Approve</span><span class="d">Mark this task approved.</span></span></label>' : ''}
+        <label class="review-choice"><input type="radio" name="action" value="request_corrections" ${isApproved ? 'checked' : ''}><span><span class="t">Request corrections</span><span class="d">Return the task to the student with a required reason.</span></span></label>
+      </fieldset>
+      <div><label class="form-label fw-semibold" for="task-remarks">Correction reason <span id="task-remarks-req" class="text-muted fw-normal">${isApproved ? '(required)' : '(optional)'}</span></label><textarea class="form-control" id="task-remarks" name="remarks" rows="3" maxlength="1000" placeholder="${isApproved ? 'Enter reason why correction is required...' : ''}"></textarea><div class="invalid-feedback"></div></div></form>`;
     m.footer.innerHTML = '<button type="button" class="btn btn-outline-secondary" data-act="cancel">Cancel</button><button type="submit" class="btn btn-primary" form="task-review-form">Save decision</button>';
     m.footer.querySelector('[data-act=cancel]').addEventListener('click', () => m.close());
     const form = m.body.querySelector('form');
+
+    const syncRemarksReq = () => {
+      const act = form.elements.action ? form.elements.action.value : 'approve';
+      const reqSpan = m.body.querySelector('#task-remarks-req');
+      if (reqSpan) reqSpan.textContent = act === 'request_corrections' ? '(required, min 5 chars)' : '(optional)';
+    };
+    form.addEventListener('change', syncRemarksReq);
+    syncRemarksReq();
+
     form.addEventListener('submit', async (event) => {
       event.preventDefault(); UI.clearFieldErrors(form); m.alertArea.innerHTML = '';
       const button = m.footer.querySelector('[type=submit]'); UI.setLoading(button, true, 'Saving'); m.setBusy(true);
       try {
-        const res = await Api.post(`/api/admin/students/${data.student.id}/tasks/${encodeURIComponent(key)}/review`, { action: form.elements.action.value, remarks: form.elements.remarks.value });
+        const actionVal = form.elements.action ? form.elements.action.value : (isApproved ? 'request_corrections' : 'approve');
+        const res = await Api.post(`/api/admin/students/${data.student.id}/tasks/${encodeURIComponent(key)}/review`, { action: actionVal, remarks: form.elements.remarks.value });
         m.setBusy(false); m.close(); done(res.message)(res);
       } catch (err) { m.setBusy(false); UI.setLoading(button, false); UI.setFieldErrors(form, err.errors); UI.showAlertIn(m.alertArea, 'danger', err.message); }
     });

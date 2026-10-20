@@ -92,7 +92,7 @@ async function search(rawQuery) {
     let results = [];
     if (ids.length) {
       const rows = db.prepare(
-        `SELECT s.id, s.full_name, s.email, c.application_id, c.cap_round, COALESCE(r.status, CASE WHEN c.id IS NULL THEN 'not_started' ELSE 'pending' END) AS review,
+        `SELECT s.id, s.full_name, s.email, s.admission_token, c.application_id, c.cap_round, COALESCE(r.status, CASE WHEN c.id IS NULL THEN 'not_started' ELSE 'pending' END) AS review,
                 (SELECT t.token_code FROM queue_tokens t WHERE t.student_id = s.id AND t.queue_date = ? ORDER BY t.id DESC LIMIT 1) AS token,
                 (SELECT t.status FROM queue_tokens t WHERE t.student_id = s.id AND t.queue_date = ? ORDER BY t.id DESC LIMIT 1) AS token_status
            FROM students s LEFT JOIN cap_details c ON c.student_id = s.id LEFT JOIN application_reviews r ON r.student_id = s.id
@@ -101,7 +101,7 @@ async function search(rawQuery) {
       const byId = new Map(rows.map((r) => [r.id, r]));
       results = ids.filter((id) => byId.has(id)).map((id) => {
         const r = byId.get(id);
-        return { id, name: r.full_name, email: r.email, applicationId: r.application_id, capRound: r.cap_round, reviewStatus: r.review, token: r.token, tokenStatus: r.token_status, matchedBy: matches.get(id) };
+        return { id, name: r.full_name, email: r.email, applicationId: r.application_id, admissionToken: r.admission_token || null, capRound: r.cap_round, reviewStatus: r.review, token: r.token, tokenStatus: r.token_status, matchedBy: matches.get(id) };
       });
     }
     return { query: q, results, total: matches.size, truncated: matches.size > MAX_RESULTS, algorithms, indexRebuilt: rebuilt };

@@ -13,6 +13,7 @@
 
 #include <string>
 
+#include "admission_progress_heap.hpp"
 #include "queue_engine.hpp"
 #include "search_index.hpp"
 #include "undo_stacks.hpp"
@@ -21,9 +22,10 @@ namespace admitflow {
 
 struct Toolkit {
   explicit Toolkit(int fairness = 3) : queue(fairness), undo(20) {}
-  QueueEngine queue;      // Phase 4: tokens, lanes, counters
-  SearchIndex index;      // Phase 5: searching (binary / linear) over a merge-sorted index
-  UndoStacks undo;        // Phase 5: stack of reversible admin actions per admin
+  QueueEngine queue;                // Phase 4: tokens, lanes, counters
+  SearchIndex index;                // Phase 5: searching (binary / linear) over a merge-sorted index
+  UndoStacks undo;                  // Phase 5: stack of reversible admin actions per admin
+  AdmissionProgressHeap progress;   // Dedicated permanent admission-progress max-heap
 };
 
 std::string handleToolkitLine(Toolkit& toolkit, const std::string& line, bool& quit);

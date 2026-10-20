@@ -10,6 +10,7 @@ const appointments = require('../controllers/admin/appointmentController');
 const queue = require('../controllers/admin/queueController');
 const tools = require('../controllers/admin/toolsController');
 const cap = require('../controllers/admin/capController');
+const progressQueue = require('../controllers/admin/progressQueueController');
 const { requireAdmin, requirePermission, protectMutations } = require('../middleware/adminAuth');
 
 const router = express.Router();
@@ -51,6 +52,11 @@ router.post('/queue/tokens/:id/complete', requirePermission('queue:operate'), qu
 router.post('/queue/tokens/:id/no-show', requirePermission('queue:operate'), queue.noShow);
 router.post('/queue/tokens/:id/cancel', requirePermission('queue:operate'), queue.cancel);
 
+// permanent admission progress queue (Phase 6)
+router.get('/progress-queue', requirePermission('queue:view'), progressQueue.list);
+router.get('/progress-queue/:id', requirePermission('queue:view'), progressQueue.getStudent);
+router.get('/admission-progress-queue', requirePermission('queue:view'), progressQueue.list);
+
 // CAP allotment verification (trusted records, claims, corrections, audit)
 router.get('/cap/records', requirePermission('cap:view'), cap.list);
 router.post('/cap/records/import', requirePermission('cap:manage'), cap.importCsv);
@@ -63,6 +69,9 @@ router.post('/cap/records/:id/unlink', requirePermission('cap:manage'), cap.unli
 router.get('/cap/claims', requirePermission('cap:view'), cap.listClaims);
 router.post('/cap/claims/:id/approve', requirePermission('cap:manage'), cap.approveClaim);
 router.post('/cap/claims/:id/reject', requirePermission('cap:manage'), cap.rejectClaim);
+router.get('/cap/round-deadlines', requirePermission('cap:view'), cap.listRoundDeadlines);
+router.get('/cap/round-deadlines/:round', requirePermission('cap:view'), cap.getRoundDeadlines);
+router.put('/cap/round-deadlines/:round', requirePermission('cap:manage'), cap.setRoundDeadlines);
 
 // Phase 5: searching, sorting, matrices and undo (stack)
 router.get('/search', requirePermission('students:view'), tools.search);

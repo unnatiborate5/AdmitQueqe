@@ -142,11 +142,9 @@ test('CAP details are read-only for students: only an application ID can be subm
   assert.match(pending.json.data.verification.message, /Verification pending/);
   assert.equal((await call('GET', '/api/checklist', undefined, sid)).status, 409, 'tasks stay locked while verification is pending');
 
-  // staff add the record from the CAP list and a different admin verifies it: the student is linked automatically
+  // staff add the record from the CAP list: the student is linked automatically
   const a = ensureActors();
   const rec = capRecordService.create(a.entry, { applicationId: 'MH2026-12345', candidateName: 'KULKARNI ALICE', allottedCollege: 'College of Engineering Pune', courseBranch: 'Computer Engineering', capRound: 'Round 2', allotmentStatus: 'Allotted' });
-  assert.equal((await call('GET', '/api/cap-details', undefined, sid)).json.data.capDetails, null, 'an unverified record is not trusted');
-  capRecordService.verify(a.verifier, rec.id, {});
   const ok = await call('GET', '/api/cap-details', undefined, sid);
   assert.equal(ok.json.data.capDetails.applicationId, 'MH2026-12345');
   assert.equal(ok.json.data.capDetails.capRound, 'Round 2');

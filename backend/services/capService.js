@@ -18,6 +18,7 @@ const toDto = (r) => ({
   courseBranch: r.course_branch,
   capRound: r.cap_round,
   allotmentStatus: r.allotment_status,
+  admissionToken: r.admission_token || null,
   updatedAt: r.updated_at,
   verified: true,   // a cap_details row only ever exists for a student linked to a VERIFIED record
 });
@@ -28,7 +29,16 @@ const toDto = (r) => ({
  * typed by a student.
  */
 function get(studentId) {
-  const row = db.prepare('SELECT * FROM cap_details WHERE student_id = ?').get(studentId);
+  let row = db.prepare(`
+    SELECT c.*, s.admission_token
+      FROM cap_details c
+      JOIN students s ON s.id = c.student_id
+     WHERE c.student_id = ?
+  `).get(studentId);
+  if (row && !row.admission_token) {
+    const admissionTokenService = require('./admissionTokenService');
+    row.admission_token = admissionTokenService.allocateAdmissionToken(studentId, db);
+  }
   return row ? toDto(row) : null;
 }
 

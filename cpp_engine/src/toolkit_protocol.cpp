@@ -30,6 +30,15 @@ bool toInt(const std::string& s, long long& out) {
   return true;
 }
 
+bool toDouble(const std::string& s, double& out) {
+  if (s.empty()) return false;
+  char* end = nullptr;
+  double v = std::strtod(s.c_str(), &end);
+  if (end == s.c_str() || *end != '\0') return false;
+  out = v;
+  return true;
+}
+
 std::string decodeName(std::string s) { for (char& c : s) if (c == '~') c = ' '; return s; }
 
 std::string err(const std::string& code, const std::string& message) {
@@ -218,6 +227,77 @@ std::string handleToolkitLine(Toolkit& tk, const std::string& line, bool& quit) 
     o << "{\"ok\":true,\"docs\":" << r.docs << ",\"rounds\":" << r.rounds << ",\"counts\":" << arrayJson(r.counts, num) << ",\"percent\":" << arrayJson(r.percent, dbl)
       << ",\"docTotals\":" << arrayJson(r.docTotals, num) << ",\"roundTotals\":" << arrayJson(r.roundTotals, num)
       << ",\"weakestDoc\":" << arrayJson(r.weakestDoc, num) << ",\"strongestDoc\":" << arrayJson(r.strongestDoc, num) << "}";
+    return o.str();
+  }
+
+  // ------------------------------------------------------------------ admission progress queue (max-heap)
+  if (cmd == "PROGRESS_CLEAR") {
+    tk.progress.clear();
+    return "{\"ok\":true}";
+  }
+  if (cmd == "PROGRESS_UPSERT") {
+    if (a.size() != 5 || !toInt(a[1], n1) || a[2].empty()) {
+      return err("BAD_ARGUMENT", "PROGRESS_UPSERT <studentId> <token> <score> <enteredAt>");
+    }
+    double score = 0.0;
+    if (!toDouble(a[3], score)) {
+      return err("BAD_ARGUMENT", "Invalid score value.");
+    }
+    tk.progress.upsert(n1, a[2], score, decodeName(a[4]));
+    return "{\"ok\":true,\"studentId\":" + std::to_string(n1) + ",\"size\":" + std::to_string(tk.progress.size()) + "}";
+  }
+  if (cmd == "PROGRESS_REMOVE") {
+    if (a.size() != 2 || !toInt(a[1], n1)) {
+      return err("BAD_ARGUMENT", "PROGRESS_REMOVE <studentId>");
+    }
+    const bool removed = tk.progress.remove(n1);
+    return "{\"ok\":true,\"studentId\":" + std::to_string(n1) + ",\"removed\":" + (removed ? "true" : "false") + ",\"size\":" + std::to_string(tk.progress.size()) + "}";
+  }
+  if (cmd == "PROGRESS_LOAD") {
+    if (!itemsAt(a, 1, items, error)) return error;
+    for (const std::string& it : items) {
+      std::vector<std::string> f = splitOn(it, '|');
+      if (f.size() != 4 || !toInt(f[0], n1) || f[1].empty()) {
+        return err("BAD_ARGUMENT", "PROGRESS_LOAD item: studentId|token|score|enteredAt");
+      }
+      double score = 0.0;
+      if (!toDouble(f[2], score)) {
+        return err("BAD_ARGUMENT", "Invalid score in PROGRESS_LOAD item.");
+      }
+      tk.progress.upsert(n1, f[1], score, decodeName(f[3]));
+    }
+    return "{\"ok\":true,\"loaded\":" + std::to_string(items.size()) + ",\"size\":" + std::to_string(tk.progress.size()) + "}";
+  }
+  if (cmd == "PROGRESS_PEEK") {
+    const ProgressStudent* top = tk.progress.peek();
+    if (top == nullptr) {
+      return "{\"ok\":true,\"hasStudent\":false}";
+    }
+    char scoreBuf[32];
+    std::snprintf(scoreBuf, sizeof scoreBuf, "%.4f", top->score);
+    return "{\"ok\":true,\"hasStudent\":true,\"student\":{\"studentId\":" + std::to_string(top->studentId)
+      + ",\"token\":\"" + jsonEscape(top->token) + "\""
+      + ",\"score\":" + scoreBuf
+      + ",\"enteredAt\":\"" + jsonEscape(top->enteredAt) + "\"}}";
+  }
+  if (cmd == "PROGRESS_SIZE") {
+    return "{\"ok\":true,\"size\":" + std::to_string(tk.progress.size()) + "}";
+  }
+  if (cmd == "PROGRESS_RANK") {
+    std::vector<ProgressStudent> ranked = tk.progress.getRanked();
+    std::ostringstream o;
+    o << "{\"ok\":true,\"size\":" << ranked.size() << ",\"ranked\":[";
+    for (std::size_t i = 0; i < ranked.size(); ++i) {
+      if (i > 0) o << ",";
+      char scoreBuf[32];
+      std::snprintf(scoreBuf, sizeof scoreBuf, "%.4f", ranked[i].score);
+      o << "{\"position\":" << (i + 1)
+        << ",\"studentId\":" << ranked[i].studentId
+        << ",\"token\":\"" << jsonEscape(ranked[i].token) << "\""
+        << ",\"score\":" + std::string(scoreBuf)
+        << ",\"enteredAt\":\"" << jsonEscape(ranked[i].enteredAt) << "\"}";
+    }
+    o << "]}";
     return o.str();
   }
 

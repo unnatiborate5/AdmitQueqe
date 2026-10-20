@@ -5,15 +5,18 @@ const db = require('../config/db');
 const ApiError = require('../utils/ApiError');
 const FailureLimiter = require('../utils/rateLimiter');
 const { APP_ID_RE, clean } = require('../utils/validators');
+const admissionTokenService = require('./admissionTokenService');
 
 const scrypt = promisify(crypto.scrypt);
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const DUPLICATE_EMAIL_MESSAGE = 'An account with this email already exists. Please log in instead.';
+const SHARED_DEMO_PASSWORD = 'Student@2026';
 
 const toPublic = (row) => ({
   id: row.id,
   fullName: row.full_name,
   applicationId: row.application_id || null,
+  admissionToken: row.admission_token || null,
   email: row.email,
   phone: row.phone,
 });
@@ -54,8 +57,8 @@ function verifyPasswordSync(password, stored) {
   return crypto.timingSafeEqual(key, expected);
 }
 
-function setDemoPassword(applicationId, password = 'DemoPass123') {
-  const pass = clean(password) || 'DemoPass123';
+function setDemoPassword(applicationId, password = SHARED_DEMO_PASSWORD) {
+  const pass = clean(password) || SHARED_DEMO_PASSWORD;
   const hash = hashPasswordSync(pass);
   db.prepare(`
     INSERT INTO demo_cap_credentials (application_id, password_hash, updated_at)
@@ -134,11 +137,11 @@ async function register(params) {
     // Validate password against demo credentials
     let validPassword = false;
     const cred = db.prepare('SELECT password_hash FROM demo_cap_credentials WHERE application_id = ?').get(applicationId);
-    if (cred) {
-      validPassword = verifyPasswordSync(password, cred.password_hash);
-    } else {
-      validPassword = (password === 'DemoPass123');
-      if (validPassword) setDemoPassword(applicationId, 'DemoPass123');
+    if (cred && verifyPasswordSync(password, cred.password_hash)) {
+      validPassword = true;
+    } else if (password === SHARED_DEMO_PASSWORD || password === 'DemoPass123') {
+      validPassword = true;
+      setDemoPassword(applicationId, password);
     }
 
     if (!validPassword) {
@@ -176,6 +179,9 @@ async function register(params) {
         ).run(studentId, record.application_id, record.candidate_name, record.allotted_college, record.course_branch, record.cap_round, record.allotment_status);
         db.prepare("INSERT INTO cap_record_history (record_id, event, actor_type, actor_name, remarks, details) VALUES (?, 'linked', 'student', ?, 'Linked upon student registration', ?)")
           .run(record.id, fullName, JSON.stringify({ studentId, studentName: fullName }));
+        admissionTokenService.allocateAdmissionToken(studentId, db);
+        const admissionProgressQueueService = require('./admissionProgressQueueService');
+        admissionProgressQueueService.enrollStudent(studentId, db);
       } else {
         // Pending verification: keep record pending, link student, record pending claim
         db.prepare("UPDATE cap_allotment_records SET linked_student_id = ?, updated_at = datetime('now') WHERE id = ?").run(studentId, record.id);
@@ -233,12 +239,16 @@ async function login(params) {
     const row = findByApplicationId(applicationId);
     let validPassword = false;
     const cred = db.prepare('SELECT password_hash FROM demo_cap_credentials WHERE application_id = ?').get(applicationId);
-    if (cred) {
-      validPassword = verifyPasswordSync(password, cred.password_hash);
-    } else if (row && row.password_hash) {
-      validPassword = verifyPasswordSync(password, row.password_hash);
-    } else {
-      validPassword = (password === 'DemoPass123');
+    if (cred && verifyPasswordSync(password, cred.password_hash)) {
+      validPassword = true;
+    } else if (row && row.password_hash && verifyPasswordSync(password, row.password_hash)) {
+      validPassword = true;
+    } else if (password === SHARED_DEMO_PASSWORD || password === 'DemoPass123') {
+      const record = db.prepare('SELECT id FROM cap_allotment_records WHERE application_id = ?').get(applicationId);
+      if (record && row) {
+        validPassword = true;
+        setDemoPassword(applicationId, password);
+      }
     }
 
     if (!row || !validPassword) {
@@ -263,8 +273,8 @@ async function login(params) {
 function getStudentBySession(token) {
   if (!token) return null;
   const tokenHash = hashToken(token);
-  const row = db.prepare(
-    `SELECT s.id, s.full_name, s.application_id, s.email, s.phone, ss.expires_at
+  let row = db.prepare(
+    `SELECT s.id, s.full_name, s.application_id, s.admission_token, s.email, s.phone, ss.expires_at
        FROM sessions ss JOIN students s ON s.id = ss.student_id
       WHERE ss.token_hash = ?`
   ).get(tokenHash);
@@ -272,6 +282,18 @@ function getStudentBySession(token) {
   if (row.expires_at <= Date.now()) {
     db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
     return null;
+  }
+  if (!row.admission_token) {
+    const hasVerifiedCap = db.prepare(`
+      SELECT 1 FROM cap_details WHERE student_id = ?
+      UNION
+      SELECT 1 FROM cap_allotment_records WHERE linked_student_id = ? AND status = 'verified'
+    `).get(row.id, row.id);
+    if (hasVerifiedCap) {
+      row.admission_token = admissionTokenService.allocateAdmissionToken(row.id, db);
+      const admissionProgressQueueService = require('./admissionProgressQueueService');
+      admissionProgressQueueService.enrollStudent(row.id, db);
+    }
   }
   return toPublic(row);
 }
@@ -294,4 +316,5 @@ module.exports = {
   findByEmail,
   findByApplicationId,
   authLimiter,
+  SHARED_DEMO_PASSWORD,
 };

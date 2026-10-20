@@ -45,7 +45,7 @@
       </li>`).join('')}</ol>`;
   }
 
-  function renderCap(cap, verification) {
+  function renderCap(cap, verification, admissionToken) {
     if (!cap) {
       const pending = verification && verification.status === 'pending';
       const appId = (verification && verification.applicationId) || '';
@@ -55,10 +55,12 @@
     : '<p class="text-muted mb-3">Your allotment record is awaiting verification by the admission cell.</p>'}
         <a href="cap-details.html" class="btn btn-primary btn-sm" id="view-cap-details-card-btn">View CAP Details</a>`;
     }
+    const token = (cap && cap.admissionToken) || admissionToken;
     return `<div class="d-flex justify-content-between align-items-start mb-2">
         <h2 class="panel-title mb-0">CAP allotment</h2>
       </div>
       <dl class="cap-summary mt-3">
+        ${token ? `<dt>Permanent Admission Token</dt><dd><span class="badge bg-primary fs-6" id="cap-card-admission-token">${UI.esc(token)}</span></dd>` : ''}
         <dt>Allotted college</dt><dd>${UI.esc(cap.allottedCollege)}</dd>
         <dt>Course / branch</dt><dd>${UI.esc(cap.courseBranch)}</dd>
         <dt>CAP round</dt><dd>${UI.esc(cap.capRound)}</dd>
@@ -169,8 +171,9 @@
         <p class="mb-0 small">Your verification appointment is today at ${UI.esc(UI.formatClock(q.appointmentToday.time))}, ${UI.esc(q.appointmentToday.venue)}. When you arrive, the verification desk will check you in and give you a token. Your token and queue position will appear here.</p>`;
     }
     return `<div class="token-card ${UI.esc(t.status)}">
-        <div class="small fw-bold text-muted text-uppercase">Your token</div>
+        <div class="small fw-bold text-muted text-uppercase">Temporary Queue Ticket</div>
         <div class="token-code">${UI.esc(t.code)}</div>
+        <div class="small text-muted mb-1">(Valid for today's physical verification only)</div>
         <div class="my-2">${UI.statusPill(t.status, t.statusLabel)} ${t.priority ? `<span class="priority-tag" title="${UI.esc(t.priorityReason)}">Priority</span>` : ''}</div>
         ${t.status === 'waiting' && t.position ? `<div class="token-position">Position ${t.position} &middot; ${t.ahead} ahead of you</div>` : ''}
         ${t.counter && (t.status === 'called' || t.status === 'serving') ? `<div class="token-position">${UI.esc(t.counter)}</div>` : ''}
@@ -206,12 +209,13 @@
     queueState = d.queue || null;
     const studentName = d.student.fullName || '';
     const studentAppId = d.student.applicationId || (d.cap && d.cap.applicationId) || (d.capVerification && d.capVerification.applicationId) || '';
+    const admissionToken = d.admissionToken || d.student.admissionToken || (d.cap && d.cap.admissionToken) || null;
     const p = d.progress;
     root.innerHTML = `
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-4">
         <div>
           <h1 class="page-title mb-1">Welcome, ${UI.esc(studentName)}</h1>
-          <p class="text-muted mb-0">CAP Application ID: <strong id="student-cap-app-id">${UI.esc(studentAppId)}</strong> &middot; Admission progress after CAP allotment.</p>
+          <p class="text-muted mb-0">CAP Application ID: <strong id="student-cap-app-id">${UI.esc(studentAppId)}</strong>${admissionToken ? ` &middot; Permanent Admission Token: <span class="badge bg-primary fs-6 ms-1" id="student-admission-token">${UI.esc(admissionToken)}</span>` : ''} &middot; Admission progress after CAP allotment.</p>
         </div>
         <div class="d-flex align-items-center gap-2">
           <a href="cap-details.html" class="btn btn-outline-primary btn-sm" id="view-cap-details-btn">View CAP Details</a>
@@ -253,7 +257,7 @@
           <section class="panel mb-4">${renderNext(d.nextStep, p.completed === p.total)}</section>
           ${d.application ? `<section class="panel mb-4" aria-label="College review">${renderReviewPanel(d.application)}</section>` : ''}
           ${d.cap ? `<section class="panel mb-4" aria-label="Verification appointment">${renderAppointment(d.appointment)}</section>` : ''}
-          <section class="panel mb-4">${renderCap(d.cap, d.capVerification)}</section>
+          <section class="panel mb-4">${renderCap(d.cap, d.capVerification, admissionToken)}</section>
           <div class="manual-note"><strong>Original documents are verified in person.</strong> Visit your college for physical verification. The college records the result, and it appears here automatically.</div>
         </div>
       </div>`;

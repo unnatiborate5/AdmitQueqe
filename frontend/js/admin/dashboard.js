@@ -44,9 +44,12 @@
         <div class="col-sm-6"><a class="stat-card pending" href="students.html?status=correction_requested"><div class="d-flex justify-content-between align-items-center"><span class="lbl">Corrections requested</span><span class="num fs-3">${s.correctionRequested}</span></div></a></div>
         <div class="col-sm-6"><a class="stat-card" href="students.html?status=not_started"><div class="d-flex justify-content-between align-items-center"><span class="lbl">Registered, CAP details not entered</span><span class="num fs-3">${s.notStarted}</span></div></a></div>
       </div>
-      ${d.queue ? `<a class="stat-card verification mb-4" href="queue.html"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      ${d.queue ? `<a class="stat-card verification mb-3" href="queue.html"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span class="lbl">Verification queue today</span>
         <span><strong>${d.queue.waiting}</strong> waiting &middot; <strong>${d.queue.called + d.queue.serving}</strong> at counters &middot; <strong>${d.queue.completed}</strong> served &middot; <strong>${d.queue.no_show}</strong> no-show</span></div></a>` : ''}
+      <a class="stat-card mb-4 d-block text-decoration-none border border-primary-subtle" href="progress-queue.html"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span class="lbl fw-bold text-primary">Permanent Admission-Progress Queue</span>
+        <span class="small text-muted">All trusted CAP-matched students ranked by official institute-reporting urgency &amp; 6-task progress &rarr;</span></div></a>
       <div class="row g-4">
         <div class="col-lg-6"><section class="panel h-100">
           <div class="d-flex justify-content-between align-items-baseline mb-2"><h2 class="panel-title mb-0">Upcoming appointments</h2><a class="small" href="appointments.html?status=scheduled">View all</a></div>

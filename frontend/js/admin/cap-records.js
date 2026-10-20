@@ -141,7 +141,7 @@
         <td><div class="fw-semibold">${esc(r.candidateName)}</div><div class="cell-sub">${esc(r.allottedCollege)}, ${esc(r.courseBranch)} &middot; ${esc(r.capRound)} &middot; ${esc(r.allotmentStatus)}</div></td>
         <td class="small">${esc(r.sourceLabel)}${r.sourceNote ? `<div class="cell-sub">${esc(r.sourceNote)}</div>` : ''}<div class="cell-sub">Entered by ${esc(r.enteredBy)}</div></td>
         <td>${pill(r.status, r.statusLabel)}${r.verifiedBy ? `<div class="cell-sub">${esc(r.verifiedBy)}, ${esc(UI.formatDate(r.verifiedAt))}</div>` : ''}</td>
-        <td>${r.linkedStudent ? `<a class="text-decoration-none fw-semibold" href="student.html?id=${r.linkedStudent.id}">${esc(r.linkedStudent.name)}</a>` : '<span class="text-muted">-</span>'}</td>
+        <td>${r.linkedStudent ? `<a class="text-decoration-none fw-semibold" href="student.html?id=${r.linkedStudent.id}">${esc(r.linkedStudent.name)}</a>${r.linkedStudent.admissionToken ? ` <span class="badge bg-primary ms-1">${esc(r.linkedStudent.admissionToken)}</span>` : ''}` : '<span class="text-muted">-</span>'}</td>
         <td class="text-end"><div class="d-inline-flex flex-wrap gap-1 justify-content-end">${acts.join('')}</div></td></tr>`;
     }).join('')}</tbody>`;
   }
@@ -150,7 +150,7 @@
     const head = '<thead><tr><th>Student</th><th>Submitted ID</th><th>Why it is waiting</th><th>Submitted</th><th class="text-end">Actions</th></tr></thead>';
     if (!claims.items.length) return `${head}<tbody><tr><td colspan="5"><div class="empty-state">No students are waiting for verification.</div></td></tr></tbody>`;
     return `${head}<tbody>${claims.items.map((c) => `<tr>
-      <td><a class="fw-semibold text-decoration-none" href="student.html?id=${c.student.id}">${esc(c.student.name)}</a><div class="cell-sub">${esc(c.student.email)}</div></td>
+      <td><a class="fw-semibold text-decoration-none" href="student.html?id=${c.student.id}">${esc(c.student.name)}</a>${c.student.admissionToken ? ` <span class="badge bg-primary ms-1">${esc(c.student.admissionToken)}</span>` : ''}<div class="cell-sub">${esc(c.student.email)}</div></td>
       <td><span class="code-chip">${esc(c.applicationId)}</span>${c.record ? `<div class="cell-sub">Record: ${esc(c.record.candidateName)} (${esc(c.record.statusLabel.toLowerCase())})</div>` : ''}</td>
       <td>${UI.statusPill(reasonClass[c.reason] || 'pending', c.reasonLabel)}</td><td class="small">${esc(UI.formatDate(c.submittedAt))}</td>
       <td class="text-end">${canManage ? `<div class="d-inline-flex gap-1">${c.canApprove ? `<button class="btn btn-primary btn-sm" data-act="approve" data-id="${c.id}">Link student</button>` : ''}<button class="btn btn-outline-danger btn-sm" data-act="reject" data-id="${c.id}">Reject</button></div>` : ''}</td></tr>`).join('')}</tbody>`;

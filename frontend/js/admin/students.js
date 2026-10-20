@@ -33,7 +33,7 @@
       <tr class="row-link" data-id="${s.id}" tabindex="0">
         <td><a class="fw-semibold text-decoration-none" href="student.html?id=${s.id}">${esc(s.fullName)}</a>
             <div class="cell-sub">${esc(s.email)} &middot; ${esc(s.phone)}</div></td>
-        <td>${s.applicationId ? `<div class="fw-semibold">${esc(s.applicationId)}</div><div class="cell-sub">${esc(s.college)}, ${esc(s.branch)} &middot; ${esc(s.capRound)}</div>` : '<span class="text-muted">No CAP details</span>'}</td>
+        <td>${s.applicationId ? `<div class="fw-semibold">${esc(s.applicationId)}${s.admissionToken ? ` <span class="badge bg-primary ms-1">${esc(s.admissionToken)}</span>` : ''}</div><div class="cell-sub">${esc(s.college)}, ${esc(s.branch)} &middot; ${esc(s.capRound)}</div>` : '<span class="text-muted">No CAP details</span>'}</td>
         <td>${Admin.reviewPill(s.reviewStatus)}</td>
         <td>${s.verificationStatus ? Admin.verifPill(s.verificationStatus) : '<span class="text-muted">-</span>'}</td>
         <td>${s.appointment ? `<div class="small fw-semibold">${esc(UI.formatDay(s.appointment.date))}</div><div class="cell-sub">${esc(UI.formatClock(s.appointment.time))}</div>` : '<span class="text-muted">-</span>'}</td>

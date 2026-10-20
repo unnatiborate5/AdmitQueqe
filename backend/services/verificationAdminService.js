@@ -59,6 +59,8 @@ function record(admin, studentId, { status, remarks }) {
         taskWorkflowService.officerReview(admin, studentId, 'physical_verification', { action: 'approve' });
       }
     }
+    const admissionProgressQueueService = require('./admissionProgressQueueService');
+    admissionProgressQueueService.handleTaskUpdate(studentId, db);
     return verificationService.get(studentId);
   })();
 }

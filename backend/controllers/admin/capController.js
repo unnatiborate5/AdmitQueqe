@@ -23,4 +23,18 @@ module.exports = {
   listClaims: asyncHandler(async (req, res) => res.json(ok(capRecordService.listClaims(req.query)))),
   approveClaim: asyncHandler(async (req, res) => res.json(ok(capRecordService.approveClaim(req.admin, v.parseId(req.params.id, 'Claim'), req.body), 'Student linked to the record.'))),
   rejectClaim: asyncHandler(async (req, res) => res.json(ok(capRecordService.rejectClaim(req.admin, v.parseId(req.params.id, 'Claim'), req.body), 'Claim rejected.'))),
+  listRoundDeadlines: asyncHandler(async (req, res) => {
+    const capRoundDeadlineService = require('../../services/capRoundDeadlineService');
+    res.json(ok(capRoundDeadlineService.getAllDeadlines()));
+  }),
+  getRoundDeadlines: asyncHandler(async (req, res) => {
+    const capRoundDeadlineService = require('../../services/capRoundDeadlineService');
+    const data = capRoundDeadlineService.getDeadlines(req.params.round);
+    res.json(ok(data));
+  }),
+  setRoundDeadlines: asyncHandler(async (req, res) => {
+    const capRoundDeadlineService = require('../../services/capRoundDeadlineService');
+    const data = capRoundDeadlineService.setDeadlines(req.admin, req.params.round, req.body || {});
+    res.json(ok(data, `Official deadlines for ${req.params.round} updated.`));
+  }),
 };

@@ -6,8 +6,9 @@ CREATE TABLE IF NOT EXISTS students (
   full_name     TEXT    NOT NULL,
   email         TEXT    NOT NULL UNIQUE,
   phone         TEXT    NOT NULL,
-  password_hash TEXT    NOT NULL,
-  created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+  password_hash   TEXT    NOT NULL,
+  admission_token TEXT    UNIQUE,
+  created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Login sessions. Only a SHA-256 hash of the session token is stored.
@@ -380,3 +381,44 @@ CREATE TABLE IF NOT EXISTS task_uploads (
   UNIQUE (student_id, task_key, slot)
 );
 CREATE INDEX IF NOT EXISTS idx_task_uploads_student ON task_uploads(student_id, task_key);
+
+-- ===========================================================================
+-- Phase 6: Permanent Admission Progress Queue (additive).
+-- Tracks every trusted CAP-matched student through all 6 admission tasks.
+-- Deterministic priority score: 60% deadline urgency + 40% approved-task progress.
+-- Isolated from physical verification queue tokens (queue_tokens).
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS admission_progress_queue (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id      INTEGER NOT NULL UNIQUE REFERENCES students(id) ON DELETE CASCADE,
+  admission_token TEXT    NOT NULL,
+  entered_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  status          TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed')),
+  completed_at    TEXT,
+  created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_progress_queue_status ON admission_progress_queue(status, entered_at);
+
+-- ===========================================================================
+-- Verified CAP Round Deadlines (Phase 6 additive)
+-- Stores separate official dates for each CAP round:
+--   1. seat_acceptance_deadline (CAP portal seat acceptance)
+--   2. institute_reporting_deadline (institute reporting & admission confirmation -
+--      relevant to the six-task admission workflow)
+--   3. admission_cutoff_deadline (overall system-wide admission cutoff)
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS cap_round_deadlines (
+  id                           INTEGER PRIMARY KEY AUTOINCREMENT,
+  cap_round                    TEXT    NOT NULL UNIQUE,
+  seat_acceptance_deadline     TEXT,    -- YYYY-MM-DD
+  institute_reporting_deadline TEXT,    -- YYYY-MM-DD (workflow relevant)
+  admission_cutoff_deadline    TEXT,    -- YYYY-MM-DD
+  is_verified                  INTEGER NOT NULL DEFAULT 1 CHECK (is_verified IN (0, 1)),
+  verified_by_name             TEXT,
+  verified_at                  TEXT,
+  notes                        TEXT,
+  created_at                   TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at                   TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_round_deadlines_round ON cap_round_deadlines(cap_round);

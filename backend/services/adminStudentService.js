@@ -39,8 +39,9 @@ function list(query) {
   if (query.search && String(query.search).trim()) {
     const t = likeTerm(query.search);
     where.push(`(s.full_name LIKE ? ESCAPE '\\' OR s.email LIKE ? ESCAPE '\\' OR s.phone LIKE ? ESCAPE '\\'
+                 OR s.admission_token LIKE ? ESCAPE '\\'
                  OR c.application_id LIKE ? ESCAPE '\\' OR c.allotted_college LIKE ? ESCAPE '\\')`);
-    args.push(t, t, t, t, t);
+    args.push(t, t, t, t, t, t);
   }
   const status = pick(query.status, REVIEW_FILTERS);
   if (status) { where.push(`${REVIEW_SQL} = ?`); args.push(status); }
@@ -60,7 +61,7 @@ function list(query) {
   const total = db.prepare(`SELECT COUNT(*) AS n ${FROM} ${clause}`).get(...args).n;
   const order = SORTS[query.sort] || SORTS.recent;
   const rows = db.prepare(
-    `SELECT s.id, s.full_name, s.email, s.phone, s.created_at,
+    `SELECT s.id, s.full_name, s.email, s.phone, s.created_at, s.admission_token,
             c.application_id, c.allotted_college, c.course_branch, c.cap_round, c.allotment_status,
             ${REVIEW_SQL} AS review_status, ${VERIF_SQL} AS verification_status,
             a.appointment_date, a.appointment_time
@@ -73,6 +74,7 @@ function list(query) {
       fullName: r.full_name,
       email: r.email,
       phone: r.phone,
+      admissionToken: r.admission_token || null,
       registeredAt: r.created_at,
       applicationId: r.application_id,
       college: r.allotted_college,
@@ -92,10 +94,11 @@ function list(query) {
 
 /** Everything an admin needs to inspect one application. Never includes the password hash. */
 function getDetail(studentId) {
-  const s = db.prepare('SELECT id, full_name, email, phone, created_at FROM students WHERE id = ?').get(studentId);
+  const s = db.prepare('SELECT id, full_name, email, phone, admission_token, created_at FROM students WHERE id = ?').get(studentId);
   if (!s) throw new ApiError(404, 'Student not found.');
-  const student = { id: s.id, fullName: s.full_name, email: s.email, phone: s.phone };
   const cap = capService.get(s.id);
+  const admissionToken = (cap && cap.admissionToken) || s.admission_token || null;
+  const student = { id: s.id, fullName: s.full_name, email: s.email, phone: s.phone, admissionToken };
   const summary = dashboardService.getSummary(student);
   const accept = checklistService.getRecord(s.id, 'allotment_acceptance');
   const form = checklistService.getRecord(s.id, 'admission_form');
@@ -120,6 +123,7 @@ function getDetail(studentId) {
     appointment: appointmentService.getActive(s.id),
     appointments: appointmentService.listForStudent(s.id),
     queue: cap ? (() => { const p = queueService.checkInProblem(s.id); return { tokens: queueService.tokensForStudentToday(s.id), canCheckIn: Boolean(p && p.ok), checkInProblem: p && !p.ok ? p.message : null }; })() : null,
+    progressQueue: require('./admissionProgressQueueService').getStudentQueueStatus(s.id),
   };
 }
 

@@ -39,6 +39,8 @@ function migrateLegacyCapDetails(db) {
 };
 
 module.exports = function runMigrations(db) {
+  const admissionTokenService = require('../services/admissionTokenService');
+
   // Idempotent migration for students.application_id column
   const cols = db.prepare("PRAGMA table_info(students)").all();
   const hasAppId = cols.some((c) => c.name === 'application_id');
@@ -46,6 +48,13 @@ module.exports = function runMigrations(db) {
     db.exec("ALTER TABLE students ADD COLUMN application_id TEXT;");
   }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_students_app_id ON students(application_id);");
+
+  // Idempotent migration for students.admission_token column
+  const hasAdmissionToken = cols.some((c) => c.name === 'admission_token');
+  if (!hasAdmissionToken) {
+    db.exec("ALTER TABLE students ADD COLUMN admission_token TEXT;");
+  }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_students_admission_token ON students(admission_token);");
 
   // Backfill application_id for existing students from cap_details or cap_allotment_records
   db.exec(`
@@ -57,9 +66,62 @@ module.exports = function runMigrations(db) {
      WHERE application_id IS NULL AND EXISTS (SELECT 1 FROM cap_allotment_records WHERE cap_allotment_records.linked_student_id = students.id);
   `);
 
+  // Backfill permanent admission tokens for existing verified students
+  admissionTokenService.backfillExistingTokens(db);
+
+  // Seed verified official round deadlines (Phase 6)
+  const capRoundDeadlineService = require('../services/capRoundDeadlineService');
+  capRoundDeadlineService.seedDefaultRoundDeadlines(db);
+
+  // Initialize and backfill permanent admission progress queue (Phase 6)
+  const admissionProgressQueueService = require('../services/admissionProgressQueueService');
+  admissionProgressQueueService.initQueue(db);
+
+  // Align demo student credentials to the shared demo password 'Student@2026'
+  alignDemoCredentials(db);
+
   migrateTaskWorkflow(db);
   return migrateLegacyCapDetails(db);
 };
+
+const crypto = require('crypto');
+
+function hashPasswordSync(password) {
+  const salt = crypto.randomBytes(16);
+  const key = crypto.scryptSync(password, salt, 64);
+  return `${salt.toString('hex')}:${key.toString('hex')}`;
+}
+
+/** Safe, idempotent alignment of demo student accounts and CAP credentials to 'Student@2026'. */
+function alignDemoCredentials(db) {
+  const SHARED_PASSWORD = 'Student@2026';
+  const demoHash = hashPasswordSync(SHARED_PASSWORD);
+
+  db.prepare(`
+    UPDATE students
+       SET password_hash = ?
+     WHERE application_id IS NOT NULL
+        OR email LIKE '%.demo@example.com'
+        OR email LIKE '%@student.admitflow.local'
+  `).run(demoHash);
+
+  db.prepare(`
+    UPDATE demo_cap_credentials
+       SET password_hash = ?, updated_at = datetime('now')
+  `).run(demoHash);
+
+  const records = db.prepare('SELECT application_id FROM cap_allotment_records WHERE application_id IS NOT NULL').all();
+  const upsertCred = db.prepare(`
+    INSERT INTO demo_cap_credentials (application_id, password_hash, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(application_id) DO UPDATE SET password_hash = excluded.password_hash, updated_at = datetime('now')
+  `);
+  db.transaction(() => {
+    for (const r of records) {
+      upsertCred.run(r.application_id, demoHash);
+    }
+  })();
+}
 
 /** Map old student-self-set checklist statuses onto the officer-review workflow. Never auto-approves. */
 function migrateTaskWorkflow(db) {

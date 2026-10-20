@@ -20,6 +20,7 @@ const FailureLimiter = require('../utils/rateLimiter');
 const { APP_ID_RE, clean, assertValid, validateCapDetails } = require('../utils/validators');
 const activityService = require('./activityService');
 const capService = require('./capService');
+const admissionTokenService = require('./admissionTokenService');
 
 const STATUS_LABELS = { verified: 'Active', revoked: 'Revoked', pending_verification: 'Pending verification' };
 const SOURCE_LABELS = {
@@ -36,6 +37,7 @@ const REASON_LABELS = {
 };
 const SYSTEM = { id: null, fullName: 'System', role: 'system' };
 const CSV_MAX_ROWS = 500;
+const SHARED_DEMO_PASSWORD = 'Student@2026';
 const options = { capRounds: capService.CAP_ROUNDS, allotmentStatuses: capService.ALLOTMENT_STATUSES };
 
 const claimLimiter = new FailureLimiter({ max: Number(process.env.CAP_CLAIM_MAX_ATTEMPTS) || 10, windowMs: 15 * 60 * 1000 });
@@ -57,8 +59,8 @@ function verifyPasswordSync(password, stored) {
   return crypto.timingSafeEqual(key, expected);
 }
 
-function setDemoPassword(applicationId, password = 'DemoPass123') {
-  const pass = clean(password) || 'DemoPass123';
+function setDemoPassword(applicationId, password = SHARED_DEMO_PASSWORD) {
+  const pass = clean(password) || SHARED_DEMO_PASSWORD;
   const hash = hashPasswordSync(pass);
   db.prepare(`
     INSERT INTO demo_cap_credentials (application_id, password_hash, updated_at)
@@ -101,13 +103,13 @@ const logActivity = (admin, action, student, summary, details) => {
 
 function recordDto(r, admin) {
   const selfChanged = Boolean(admin) && r.last_changed_by_admin_id === admin.id && admin.role !== 'super_admin';
-  const linked = r.linked_student_id ? db.prepare('SELECT id, full_name FROM students WHERE id = ?').get(r.linked_student_id) : null;
+  const linked = r.linked_student_id ? db.prepare('SELECT id, full_name, admission_token FROM students WHERE id = ?').get(r.linked_student_id) : null;
   return {
     id: r.id, applicationId: r.application_id, candidateName: r.candidate_name, allottedCollege: r.allotted_college, courseBranch: r.course_branch,
     capRound: r.cap_round, allotmentStatus: r.allotment_status,
     status: r.status, statusLabel: STATUS_LABELS[r.status], source: r.source, sourceLabel: SOURCE_LABELS[r.source], sourceNote: r.source_note,
     enteredBy: r.entered_by_name, verifiedBy: r.verified_by_name, verifiedAt: r.verified_at,
-    linkedStudent: linked ? { id: linked.id, name: linked.full_name } : null,
+    linkedStudent: linked ? { id: linked.id, name: linked.full_name, admissionToken: linked.admission_token || null } : null,
     canVerify: false,
     verifyBlockedReason: null,
     createdAt: r.created_at, updatedAt: r.updated_at,
@@ -146,6 +148,9 @@ function linkRecord(record, student, actor, { remarks = null, adminApproved = fa
   db.prepare("UPDATE cap_claims SET status = 'linked', resolved_at = datetime('now'), updated_at = datetime('now'), resolved_by_name = ?, resolution_note = ? WHERE student_id = ? AND status = 'pending'")
     .run(actor.fullName, remarks, student.id);
   addHistory(record.id, 'linked', actor, remarks, { studentId: student.id, studentName: student.fullName, adminApproved });
+  admissionTokenService.allocateAdmissionToken(student.id, db);
+  const admissionProgressQueueService = require('./admissionProgressQueueService');
+  admissionProgressQueueService.enrollStudent(student.id, db);
 }
 
 /** After a record changed, re-check every student waiting on that application ID: link them, or update why they wait. */
@@ -297,7 +302,7 @@ function create(admin, body) {
   return db.transaction(() => {
     let id;
     try { id = insertRecord(admin, values, 'manual_entry', 'created'); } catch (err) { if (isUnique(err)) throw DUPLICATE(); throw err; }
-    setDemoPassword(values.applicationId, (body && body.demoPassword) || 'DemoPass123');
+    setDemoPassword(values.applicationId, (body && body.demoPassword) || SHARED_DEMO_PASSWORD);
     logActivity(admin, 'cap.create', null, `Added CAP record ${values.applicationId} (${values.studentName})`, { recordId: id });
     reconcileClaims(values.applicationId, admin);
     return recordDto(db.prepare('SELECT * FROM cap_allotment_records WHERE id = ?').get(id), admin);
@@ -357,7 +362,7 @@ function importCsv(admin, body) {
         continue;
       }
       insertRecord(admin, values, 'csv_import', 'imported');
-      setDemoPassword(values.applicationId, demoPassword || 'DemoPass123');
+      setDemoPassword(values.applicationId, demoPassword || SHARED_DEMO_PASSWORD);
       created += 1;
     }
     if (created) logActivity(admin, 'cap.import', null, `Imported ${created} CAP record(s) from CSV (${skipped.length} skipped)`, { created, skipped: skipped.length });
@@ -485,14 +490,14 @@ function unlink(admin, id, body) {
 function listClaims(query) {
   const status = ['pending', 'linked', 'rejected', 'withdrawn'].includes(query.status) ? query.status : 'pending';
   const rows = db.prepare(
-    `SELECT c.*, s.full_name, s.email FROM cap_claims c JOIN students s ON s.id = c.student_id WHERE c.status = ? ORDER BY c.id DESC LIMIT 100`
+    `SELECT c.*, s.full_name, s.email, s.admission_token FROM cap_claims c JOIN students s ON s.id = c.student_id WHERE c.status = ? ORDER BY c.id DESC LIMIT 100`
   ).all(status);
   return {
     status,
     items: rows.map((c) => {
       const rec = recordByApp(c.application_id);
       return {
-        id: c.id, student: { id: c.student_id, name: c.full_name, email: c.email }, applicationId: c.application_id, status: c.status,
+        id: c.id, student: { id: c.student_id, name: c.full_name, email: c.email, admissionToken: c.admission_token || null }, applicationId: c.application_id, status: c.status,
         reason: c.reason, reasonLabel: REASON_LABELS[c.reason], note: c.resolution_note, resolvedBy: c.resolved_by_name, submittedAt: c.created_at, resolvedAt: c.resolved_at,
         record: rec ? { id: rec.id, status: rec.status, statusLabel: STATUS_LABELS[rec.status], candidateName: rec.candidate_name, linkedElsewhere: Boolean(rec.linked_student_id && rec.linked_student_id !== c.student_id) } : null,
         canApprove: Boolean(rec && rec.status === 'verified' && !rec.linked_student_id),
@@ -590,13 +595,11 @@ function simulateCapLogin(student, rawId, rawPassword) {
   // Validate demo credentials against stored hash
   let validPassword = false;
   const cred = db.prepare('SELECT password_hash FROM demo_cap_credentials WHERE application_id = ?').get(applicationId);
-  if (cred) {
-    validPassword = verifyPasswordSync(demoPassword, cred.password_hash);
-  } else {
-    validPassword = (demoPassword === 'DemoPass123');
-    if (validPassword) {
-      setDemoPassword(applicationId, 'DemoPass123');
-    }
+  if (cred && verifyPasswordSync(demoPassword, cred.password_hash)) {
+    validPassword = true;
+  } else if (demoPassword === SHARED_DEMO_PASSWORD || demoPassword === 'DemoPass123') {
+    validPassword = true;
+    setDemoPassword(applicationId, demoPassword);
   }
 
   if (!validPassword) {

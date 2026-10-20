@@ -9,10 +9,16 @@ const db = require('../config/db');
 const state = (studentId) => {
   const capDetails = capService.get(studentId);
   const verification = capRecordService.studentState(studentId);
+  const student = db.prepare('SELECT admission_token FROM students WHERE id = ?').get(studentId);
+  let admissionToken = (capDetails && capDetails.admissionToken) || (student ? student.admission_token : null) || null;
   let details = capDetails;
   if (!details) {
     const rec = db.prepare('SELECT * FROM cap_allotment_records WHERE linked_student_id = ?').get(studentId);
     if (rec) {
+      if (!admissionToken && rec.status === 'verified') {
+        const admissionTokenService = require('../services/admissionTokenService');
+        admissionToken = admissionTokenService.allocateAdmissionToken(studentId, db);
+      }
       details = {
         applicationId: rec.application_id,
         studentName: rec.candidate_name,
@@ -20,13 +26,16 @@ const state = (studentId) => {
         courseBranch: rec.course_branch,
         capRound: rec.cap_round,
         allotmentStatus: rec.allotment_status,
+        admissionToken,
         updatedAt: rec.updated_at,
         verified: rec.status === 'verified',
         status: rec.status,
       };
     }
+  } else if (details && !details.admissionToken && admissionToken) {
+    details.admissionToken = admissionToken;
   }
-  return { capDetails: details, verification };
+  return { capDetails: details, verification, admissionToken };
 };
 
 const getCapDetails = asyncHandler(async (req, res) => {
