@@ -17,7 +17,7 @@
     <div id="alert-area"></div>
     <div class="mb-3">
       <h1 class="page-title mb-1">Planner</h1>
-      <p class="text-muted mb-0">Worklists and reports computed by the C++ engine: who to schedule first, who arrives when, how busy the appointment slots are, and which documents students are missing.</p>
+      <p class="text-muted mb-0">Worklists and reports: who to schedule first, who arrives when, how busy the appointment slots are, and which documents students are missing.</p>
     </div>
 
     <section class="panel table-panel mb-4" aria-labelledby="h-unsched">
@@ -25,7 +25,6 @@
       <div class="table-responsive"><table class="table admin-table align-middle">
         <thead><tr><th>#</th><th>Student</th><th>Priority</th><th>Waiting since</th><th></th></tr></thead>
         <tbody id="unsched-rows"><tr><td colspan="5"><div class="spinner-wrap py-4">Loading</div></td></tr></tbody></table></div>
-      <div class="algo-note" id="unsched-algo"></div>
     </section>
 
     <section class="panel table-panel mb-4" aria-labelledby="h-arr">
@@ -35,7 +34,6 @@
       <div class="table-responsive"><table class="table admin-table align-middle">
         <thead><tr><th>#</th><th>Time</th><th>Student</th><th>Priority</th><th>Queue token</th><th>Appointment</th></tr></thead>
         <tbody id="arr-rows"><tr><td colspan="6"><div class="spinner-wrap py-4">Loading</div></td></tr></tbody></table></div>
-      <div class="algo-note" id="arr-algo"></div>
     </section>
 
     <section class="panel table-panel mb-4" aria-labelledby="h-load">
@@ -44,14 +42,12 @@
           <select class="form-select form-select-sm w-auto" id="load-days"><option value="7">7 days</option><option value="14" selected>14 days</option><option value="31">31 days</option></select></label></div>
       <div class="p-3 pb-0" id="load-summary"></div>
       <div class="table-responsive"><table class="table admin-table align-middle mb-0" id="load-table"></table></div>
-      <div class="algo-note" id="load-algo"></div>
     </section>
 
     <section class="panel table-panel mb-4" aria-labelledby="h-docs">
       <div class="lane-title"><span id="h-docs">4. Document readiness by CAP round</span></div>
       <div class="p-3 pb-0" id="docs-summary"></div>
       <div class="table-responsive"><table class="table admin-table align-middle mb-0" id="docs-table"></table></div>
-      <div class="algo-note" id="docs-algo"></div>
     </section>
   </main>
 

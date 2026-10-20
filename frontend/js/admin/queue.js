@@ -69,12 +69,6 @@
         <td>${esc(t.counter ? t.counter.name : '-')}</td><td class="small">${esc(when(t.createdAt))}</td><td class="small">${esc(when(t.finishedAt))}</td></tr>`).join('')}</tbody></table></div>`;
   }
 
-  function policyPanel(p) {
-    return `<section class="panel"><h2 class="panel-title">How the queue decides who is next</h2>
-      <div class="table-responsive"><table class="table admin-table"><thead><tr><th>Level</th><th>Lane</th><th>Who</th></tr></thead><tbody>
-        ${p.levels.map((l) => `<tr><td><strong>${l.level}</strong> ${esc(l.title)}</td><td>${l.lane === 'priority' ? 'Priority (heap)' : 'Regular (FIFO)'}</td><td>${esc(l.rule)}</td></tr>`).join('')}</tbody></table></div>
-      <ul class="small mb-0">${p.fairness.map((f) => `<li>${esc(f)}</li>`).join('')}</ul></section>`;
-  }
 
   function stat(label, value, cls) {
     return `<div class="col-6 col-md"><div class="stat-card ${cls || ''}"><div class="num">${value}</div><div class="lbl">${esc(label)}</div></div></div>`;
@@ -104,8 +98,7 @@
       <h2 class="h5 fw-bold mb-2">Waiting (in the order they will be called)</h2>
       <div class="row g-3 mb-4" id="q-lanes"></div>
       <h2 class="h5 fw-bold mb-2">Finished today</h2>
-      <section class="panel table-panel mb-4" id="q-finished"></section>
-      <div id="q-policy"></div>`;
+      <section class="panel table-panel mb-4" id="q-finished"></section>`;
     built = true;
     const search = document.getElementById('q-eligible-search');
     if (search) {
@@ -128,7 +121,6 @@
     document.getElementById('q-lanes').innerHTML =
       `<div class="col-lg-6">${laneTable('Priority lane', pri, 'No priority students waiting.')}</div><div class="col-lg-6">${laneTable('Regular lane (first come, first served)', reg, 'No regular students waiting.')}</div>`;
     document.getElementById('q-finished').innerHTML = finishedTable(data.finished);
-    document.getElementById('q-policy').innerHTML = policyPanel(data.policy);
     document.getElementById('q-lookup-out').innerHTML = lookupHtml;
   }
 

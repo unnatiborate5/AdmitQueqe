@@ -10,6 +10,8 @@ database/*.db-wal
 database/*.db-shm
 database/*.sqlite
 database/*.sqlite3
+database/*.bak
+database/*.db.bak
 
 # C++ build output
 cpp_engine/build/*

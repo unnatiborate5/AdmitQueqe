@@ -178,10 +178,10 @@ test('Persistent login: student logs in with CAP ID + demo password and receives
   assert.equal(meRes.json.data.student.applicationId, 'MH2026-90001');
 });
 
-test('Registration: pending record registers safely and remains clearly pending', async () => {
-  // MH2026-90002 has status pending_verification from CSV import
+test('Registration: imported record registers and is immediately trusted', async () => {
+  // MH2026-90002 has status verified from CSV import
   const recBefore = db.prepare("SELECT status FROM cap_allotment_records WHERE application_id = 'MH2026-90002'").get();
-  assert.equal(recBefore.status, 'pending_verification');
+  assert.equal(recBefore.status, 'verified');
 
   const regRes = await call('POST', '/api/auth/register', {
     applicationId: 'MH2026-90002',
@@ -191,9 +191,9 @@ test('Registration: pending record registers safely and remains clearly pending'
   assert.equal(regRes.json.data.student.fullName, 'KALE SNEHAL');
   assert.equal(regRes.json.data.student.applicationId, 'MH2026-90002');
 
-  // Verify record in database remains pending_verification (NOT automatically verified)
+  // Verify record in database remains verified and linked
   const recAfter = db.prepare("SELECT status, linked_student_id FROM cap_allotment_records WHERE application_id = 'MH2026-90002'").get();
-  assert.equal(recAfter.status, 'pending_verification');
+  assert.equal(recAfter.status, 'verified');
   assert.ok(recAfter.linked_student_id);
 
   // Student logs in
@@ -203,14 +203,14 @@ test('Registration: pending record registers safely and remains clearly pending'
   });
   assert.equal(loginRes.status, 200);
 
-  // Student views CAP details: allotment details are read-only and status is clearly pending
+  // Student views CAP details: allotment details are read-only and record is verified
   const capRes = await call('GET', '/api/cap-details', undefined, loginRes.cookie);
   assert.equal(capRes.status, 200);
   assert.equal(capRes.json.data.capDetails.applicationId, 'MH2026-90002');
   assert.equal(capRes.json.data.capDetails.studentName, 'KALE SNEHAL');
   assert.equal(capRes.json.data.capDetails.allottedCollege, 'COEP Pune');
-  assert.equal(capRes.json.data.capDetails.verified, false);
-  assert.equal(capRes.json.data.verification.status, 'pending');
+  assert.equal(capRes.json.data.capDetails.verified, true);
+  assert.equal(capRes.json.data.verification.status, 'verified');
 });
 
 test('Custom demo password from CSV import succeeds, wrong password fails with 401', async () => {

@@ -127,11 +127,7 @@
     const { capDetails: c, verification: ver } = (await Api.get('/api/cap-details')).data;
     m.setTitle(TITLES.cap_details);
     if (c) {
-      const isVerified = Boolean(c.verified || (ver && ver.status === 'verified'));
-      const statusAlert = isVerified
-        ? `<div class="alert alert-success py-2" role="status">Verified by the college admission cell${ver && ver.verifiedAt ? ` on ${esc(UI.formatDate(ver.verifiedAt))}` : ''}.</div>`
-        : '<div class="alert alert-warning py-2" role="status"><strong>Verification pending.</strong> The college admission cell has not verified this allotment record yet.</div>';
-      m.body.innerHTML = `${statusAlert}
+      m.body.innerHTML = `
         ${capSummaryHtml(c)}<p class="small text-muted mb-0">These details are read-only and maintained by the college admission cell.</p>`;
       setFooter(m, [
         { label: 'Close', cls: 'btn-outline-secondary', act: 'cancel' },

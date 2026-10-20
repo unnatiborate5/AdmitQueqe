@@ -7,8 +7,6 @@
   const $ = (id) => document.getElementById(id);
   const canSchedule = Admin.can(admin, 'appointments:manage');
   const levelTag = (level, reason) => (level < 3 ? `<span class="priority-tag" title="${esc(reason)}">Priority ${level}</span> <span class="small text-muted">${esc(reason)}</span>` : '<span class="small text-muted">Regular</span>');
-  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-  const algo = (a) => `Sorted with ${esc(a.name)}: ${plural(a.comparisons, 'comparison')} for ${plural(a.items, 'student')}.`;
   const fail = (err, rows, cols) => { if (!Admin.handleError(err) && rows) rows.innerHTML = `<tr><td colspan="${cols}"><div class="empty-state">Could not load this section.</div></td></tr>`; };
 
   // ---------------- 1. unscheduled (merge sort: priority, waiting time, name) ----------------
@@ -22,7 +20,6 @@
         <td>${levelTag(s.level, s.priorityReason)}</td><td class="small">${esc(UI.formatDate(s.waitingSince))}</td>
         <td class="text-end">${canSchedule ? `<button class="btn btn-outline-primary btn-sm" data-schedule="${s.id}" data-name="${esc(s.name)}">Schedule</button>` : ''}</td></tr>`).join('')
         : '<tr><td colspan="5"><div class="empty-state">Everyone who needs an appointment has one.</div></td></tr>';
-      $('unsched-algo').textContent = `Order: ${d.sortedBy}. ${algo(d.algorithm)}`;
     } catch (err) { fail(err, $('unsched-rows'), 5); }
   }
 
@@ -38,7 +35,6 @@
         <td>${a.token ? `<span class="code-chip">${esc(a.token)}</span> ${Admin.tokenPill(a.tokenStatus)}` : '<span class="text-muted small">Not checked in</span>'}</td>
         <td>${Admin.apptPill(a.appointmentStatus)}</td></tr>`).join('')
         : '<tr><td colspan="6"><div class="empty-state">No appointments today.</div></td></tr>';
-      $('arr-algo').textContent = `Order: ${d.sortedBy}. ${algo(d.algorithm)}`;
     } catch (err) { fail(err, $('arr-rows'), 6); }
   }
 
@@ -59,8 +55,6 @@
       const top = d.busiest.length ? d.busiest.map((b) => `${UI.formatDay(b.date)} ${UI.formatClock(b.time)} (${b.count})`).join(', ') : 'none';
       $('load-summary').innerHTML = `<p class="mb-1"><strong>${d.bookings}</strong> scheduled appointment${d.bookings === 1 ? '' : 's'} in the next ${d.days} days. Busiest slots: ${esc(top)}.</p>
         <p class="small text-muted mb-2">Columns are half-hour slots from ${esc(d.officeHours.from)} to ${esc(d.officeHours.to)} (hour or minutes past the hour). Outlined cells are the least busy slot of each day. ${outside.length ? `Outside office hours: ${esc(outside.map((c) => `${UI.formatDay(c.date)} ${c.time} (${c.count})`).join(', '))}.` : ''}</p>`;
-      const m = d.matrix;
-      $('load-algo').textContent = `Sparse matrix (${m.rows} days x ${m.cols} slots = ${m.totalCells} cells): only the ${m.storedCells} booked cell${m.storedCells === 1 ? '' : 's'} are stored (${(m.density * 100).toFixed(1)}% filled). Finding a cell is a binary search (${plural(m.lookupComparisons, 'step')} for this report).`;
     } catch (err) { Admin.handleError(err); }
   }
 
@@ -74,7 +68,6 @@
           <td class="fw-bold">${doc.totalReady}</td></tr>`).join('')}</tbody>`;
       const weak = d.weakest.filter((w) => w.document).map((w) => `${esc(w.round)}: ${esc(w.document)} (${w.percent.toFixed(0)}%)`);
       $('docs-summary').innerHTML = `<p class="mb-2"><strong>Weakest document per round:</strong> ${weak.length ? weak.join('; ') : 'no students have entered CAP details yet'}.</p>`;
-      $('docs-algo').textContent = `Dense matrix (${d.matrix.rows} documents x ${d.matrix.cols} rounds): every cell holds a real count, so the grid is stored as one contiguous array. Percentages are relative to the number of students in each round.`;
     } catch (err) { Admin.handleError(err); }
   }
 

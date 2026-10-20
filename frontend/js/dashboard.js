@@ -57,7 +57,6 @@
     }
     return `<div class="d-flex justify-content-between align-items-start mb-2">
         <h2 class="panel-title mb-0">CAP allotment</h2>
-        <span class="status-pill completed">Verified</span>
       </div>
       <dl class="cap-summary mt-3">
         <dt>Allotted college</dt><dd>${UI.esc(cap.allottedCollege)}</dd>
@@ -68,7 +67,7 @@
         <dt>Name on the CAP list</dt><dd class="mb-0">${UI.esc(cap.studentName)}</dd>
       </dl>
       <a href="cap-details.html" class="btn btn-outline-primary btn-sm mt-3" id="view-cap-details-card-btn">View CAP Details</a>
-      <p class="small text-muted mt-2 mb-0">Verified by the college admission cell. These details cannot be edited here.</p>`;
+      <p class="small text-muted mt-2 mb-0">These details cannot be edited here.</p>`;
   }
 
   function renderNext(next, allDone) {

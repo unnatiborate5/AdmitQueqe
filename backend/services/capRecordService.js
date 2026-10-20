@@ -21,7 +21,7 @@ const { APP_ID_RE, clean, assertValid, validateCapDetails } = require('../utils/
 const activityService = require('./activityService');
 const capService = require('./capService');
 
-const STATUS_LABELS = { pending_verification: 'Pending verification', verified: 'Verified', revoked: 'Revoked' };
+const STATUS_LABELS = { verified: 'Active', revoked: 'Revoked', pending_verification: 'Pending verification' };
 const SOURCE_LABELS = {
   manual_entry: 'Entered manually by staff',
   csv_import: 'Imported from a CSV list by staff',
@@ -108,8 +108,8 @@ function recordDto(r, admin) {
     status: r.status, statusLabel: STATUS_LABELS[r.status], source: r.source, sourceLabel: SOURCE_LABELS[r.source], sourceNote: r.source_note,
     enteredBy: r.entered_by_name, verifiedBy: r.verified_by_name, verifiedAt: r.verified_at,
     linkedStudent: linked ? { id: linked.id, name: linked.full_name } : null,
-    canVerify: r.status === 'pending_verification' && !selfChanged,
-    verifyBlockedReason: r.status === 'pending_verification' && selfChanged ? 'You were the last person to change this record. A different admin must verify it.' : null,
+    canVerify: false,
+    verifyBlockedReason: null,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -283,9 +283,10 @@ function getOne(admin, id) {
 function insertRecord(admin, v, source, event) {
   const id = Number(db.prepare(
     `INSERT INTO cap_allotment_records (application_id, candidate_name, allotted_college, course_branch, cap_round, allotment_status, source, source_note,
-       entered_by_admin_id, entered_by_name, last_changed_by_admin_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(v.applicationId, v.studentName, v.allottedCollege, v.courseBranch, v.capRound, v.allotmentStatus, source, v.sourceNote, admin.id, admin.fullName, admin.id).lastInsertRowid);
+       status, entered_by_admin_id, entered_by_name, verified_by_admin_id, verified_by_name, verified_at, last_changed_by_admin_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'verified', ?, ?, ?, ?, datetime('now'), ?)`
+  ).run(v.applicationId, v.studentName, v.allottedCollege, v.courseBranch, v.capRound, v.allotmentStatus, source, v.sourceNote,
+    admin.id, admin.fullName, admin.id, admin.fullName, admin.id).lastInsertRowid);
   addHistory(id, event, admin, null, { source, fields: { applicationId: v.applicationId, candidateName: v.studentName, allottedCollege: v.allottedCollege, courseBranch: v.courseBranch, capRound: v.capRound, allotmentStatus: v.allotmentStatus } });
   return id;
 }
@@ -297,7 +298,7 @@ function create(admin, body) {
     let id;
     try { id = insertRecord(admin, values, 'manual_entry', 'created'); } catch (err) { if (isUnique(err)) throw DUPLICATE(); throw err; }
     setDemoPassword(values.applicationId, (body && body.demoPassword) || 'DemoPass123');
-    logActivity(admin, 'cap.create', null, `Added CAP record ${values.applicationId} (${values.studentName}), pending verification`, { recordId: id });
+    logActivity(admin, 'cap.create', null, `Added CAP record ${values.applicationId} (${values.studentName})`, { recordId: id });
     reconcileClaims(values.applicationId, admin);
     return recordDto(db.prepare('SELECT * FROM cap_allotment_records WHERE id = ?').get(id), admin);
   })();
@@ -359,7 +360,7 @@ function importCsv(admin, body) {
       setDemoPassword(values.applicationId, demoPassword || 'DemoPass123');
       created += 1;
     }
-    if (created) logActivity(admin, 'cap.import', null, `Imported ${created} CAP record(s) from CSV (${skipped.length} skipped), pending verification`, { created, skipped: skipped.length });
+    if (created) logActivity(admin, 'cap.import', null, `Imported ${created} CAP record(s) from CSV (${skipped.length} skipped)`, { created, skipped: skipped.length });
     for (const id of seen.keys()) reconcileClaims(id, admin);
   })();
 
@@ -402,13 +403,13 @@ function update(admin, id, body) {
     if (changes.applicationId && rec.linked_student_id) {
       throw new ApiError(409, 'The application ID of a record linked to a student cannot be changed. Unlink the student first.', { applicationId: 'Linked records keep their ID.' }, 'LINKED_ID_LOCKED');
     }
-    const reopened = rec.status === 'revoked';   // correcting a revoked record sends it back for verification
+    const reopened = rec.status === 'revoked';   // correcting a revoked record restores it as active
     try {
       db.prepare(
         `UPDATE cap_allotment_records SET application_id = ?, candidate_name = ?, allotted_college = ?, course_branch = ?, cap_round = ?, allotment_status = ?, source_note = ?,
-           status = ?, verified_by_admin_id = ?, verified_by_name = ?, verified_at = ?, last_changed_by_admin_id = ?, updated_at = datetime('now') WHERE id = ?`
+           status = 'verified', verified_by_admin_id = ?, verified_by_name = ?, verified_at = COALESCE(verified_at, datetime('now')), last_changed_by_admin_id = ?, updated_at = datetime('now') WHERE id = ?`
       ).run(next.applicationId, next.candidateName, next.allottedCollege, next.courseBranch, next.capRound, next.allotmentStatus, values.sourceNote,
-        reopened ? 'pending_verification' : rec.status, reopened ? null : rec.verified_by_admin_id, reopened ? null : rec.verified_by_name, reopened ? null : rec.verified_at, admin.id, id);
+        reopened ? admin.id : (rec.verified_by_admin_id || admin.id), reopened ? admin.fullName : (rec.verified_by_name || admin.fullName), admin.id, id);
     } catch (err) { if (isUnique(err)) throw DUPLICATE(); throw err; }
     if (changes.applicationId) {
       db.prepare("UPDATE demo_cap_credentials SET application_id = ?, updated_at = datetime('now') WHERE application_id = ?").run(next.applicationId, rec.application_id);
@@ -435,7 +436,7 @@ function verify(admin, id, body) {
   return db.transaction(() => {
     const rec = db.prepare('SELECT * FROM cap_allotment_records WHERE id = ?').get(id);
     if (!rec) throw new ApiError(404, 'CAP record not found.');
-    if (rec.status === 'verified') throw new ApiError(409, 'This record is already verified.', null, 'ALREADY_VERIFIED');
+    if (rec.status === 'verified') return recordDto(rec, admin);
     if (rec.status === 'revoked') throw new ApiError(409, 'This record was revoked. Correct it first so it goes back to pending verification.', null, 'REVOKED');
     if (rec.last_changed_by_admin_id === admin.id && admin.role !== 'super_admin') {
       throw new ApiError(403, 'You were the last person to change this record. A different admin must verify it.', null, 'FOUR_EYES');

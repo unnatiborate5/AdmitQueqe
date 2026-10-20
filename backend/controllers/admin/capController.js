@@ -10,7 +10,7 @@ module.exports = {
   getOne: asyncHandler(async (req, res) => res.json(ok(capRecordService.getOne(req.admin, v.parseId(req.params.id, 'CAP record'))))),
   create: asyncHandler(async (req, res) => {
     const record = capRecordService.create(req.admin, req.body);
-    res.status(201).json(ok({ record }, 'CAP record added. It must be verified before students can be linked to it.'));
+    res.status(201).json(ok({ record }, 'CAP record added and ready for student linking.'));
   }),
   importCsv: asyncHandler(async (req, res) => {
     const result = capRecordService.importCsv(req.admin, req.body);

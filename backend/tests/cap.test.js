@@ -131,7 +131,7 @@ test('record input is validated', async () => {
   const ok = await create(rec({ applicationId: '  mh2026-50077 ' }));
   assert.equal(ok.status, 201);
   assert.equal(ok.json.data.record.applicationId, 'MH2026-50077');
-  assert.equal(ok.json.data.record.status, 'pending_verification');
+  assert.equal(ok.json.data.record.status, 'verified');
   db.prepare("DELETE FROM cap_allotment_records WHERE application_id = 'MH2026-50077'").run();
 });
 
@@ -145,14 +145,10 @@ test('a student must submit a well-formed application ID', async () => {
 });
 
 // =============================================================================================== valid records
-test('valid record: staff add it, a DIFFERENT admin verifies it, the student sees read-only details', async () => {
+test('valid record: staff add it, it is immediately trusted, the student sees read-only details', async () => {
   const s = await student('Asha Kulkarni');
-  const created = await create(rec({ applicationId: 'MH2026-50001', candidateName: 'KULKARNI ASHA SANJAY' }));
-  assert.equal(created.status, 201);
-  const id = created.json.data.record.id;
-  assert.equal(created.json.data.record.enteredBy, 'Omkar Officer');
 
-  // before verification the student gets nothing, not even a hint that the record exists
+  // before staff enters the record, the student gets nothing, not even a hint that the record exists
   const early = await claim(s, 'mh2026-50001');
   assert.equal(early.status, 200);
   assert.equal(early.json.data.result, 'pending');
@@ -166,19 +162,13 @@ test('valid record: staff add it, a DIFFERENT admin verifies it, the student see
   assert.deepEqual([task.status, task.statusLabel, task.editable], ['in_progress', 'Verification Pending', true]);
   assert.equal((await call('GET', '/api/checklist', undefined, s.cookie)).status, 409);
 
-  // the admin who entered the record cannot verify it (four-eyes)...
-  const self = await verify(id, A.officerC);
-  assert.equal(self.status, 403);
-  assert.equal(self.json.code, 'FOUR_EYES');
-  assert.equal(recordRow(id).status, 'pending_verification');
-  const listed = (await call('GET', Q('/records?status=pending_verification'), undefined, A.officerC)).json.data.items.find((r) => r.id === id);
-  assert.deepEqual([listed.canVerify, !!listed.verifyBlockedReason], [false, true]);
-  // ...a different admin can; the waiting student is linked automatically
-  const ok = await verify(id, A.officer2C, { remarks: 'Checked against the CAP list' });
-  assert.equal(ok.status, 200);
-  assert.equal(ok.json.data.record.status, 'verified');
-  assert.equal(ok.json.data.record.verifiedBy, 'Olga Officer');
-  assert.equal(ok.json.data.record.linkedStudent.id, s.id);
+  // authorized staff enters the record; it is immediately trusted and the waiting student is linked automatically
+  const created = await create(rec({ applicationId: 'MH2026-50001', candidateName: 'KULKARNI ASHA SANJAY' }));
+  assert.equal(created.status, 201);
+  const id = created.json.data.record.id;
+  assert.equal(created.json.data.record.enteredBy, 'Omkar Officer');
+  assert.equal(created.json.data.record.status, 'verified');
+  assert.equal(created.json.data.record.linkedStudent.id, s.id);
 
   const mine = await state(s);
   assert.equal(mine.verification.status, 'verified');
@@ -192,7 +182,6 @@ test('valid record: staff add it, a DIFFERENT admin verifies it, the student see
   // admin view of the student shows what backs the details
   const detail = (await call('GET', `/api/admin/students/${s.id}`, undefined, A.officerC)).json.data;
   assert.equal(detail.cap.applicationId, 'MH2026-50001');
-  assert.equal(detail.capVerification.record.verifiedBy, 'Olga Officer');
   assert.equal(detail.capVerification.record.sourceLabel, 'Entered manually by staff');
   // read-only for the student from now on
   assert.equal((await claim(s, 'MH2026-50002')).status, 409);
@@ -201,14 +190,13 @@ test('valid record: staff add it, a DIFFERENT admin verifies it, the student see
   s.id1 = id; A.ashaStudent = s;
 });
 
-test('a record that is already verified links the student immediately; a super admin may verify their own entry', async () => {
+test('a record that is already verified links the student immediately', async () => {
   const sa = await create(rec({ applicationId: 'MH2026-50002', candidateName: 'Rao Bina' }), A.saC);
-  assert.equal((await verify(sa.json.data.record.id, A.saC)).status, 200, 'super admins are exempt from the four-eyes rule');
+  assert.equal(sa.json.data.record.status, 'verified');
   const s = await student('Bina Rao');
   const r = await claim(s, 'MH2026-50002');
   assert.equal(r.json.data.result, 'linked');
   assert.equal(r.json.data.capDetails.applicationId, 'MH2026-50002');
-  assert.equal((await verify(sa.json.data.record.id, A.saC)).json.code, 'ALREADY_VERIFIED');
 });
 
 test('name matching: word order and father\'s name do not matter, other people\'s names do', () => {
@@ -229,6 +217,7 @@ test('name matching: word order and father\'s name do not matter, other people\'
 test('missing, unverified, revoked, mismatched and taken IDs all look the same to the student', async () => {
   const mismatch = await create(rec({ applicationId: 'MH2026-50010', candidateName: 'SOMEONE ELSE' })); await verify(mismatch.json.data.record.id);
   const unverified = await create(rec({ applicationId: 'MH2026-50011', candidateName: 'Pending Person' }));
+  db.prepare("UPDATE cap_allotment_records SET status = 'pending_verification' WHERE id = ?").run(unverified.json.data.record.id);
   const revoked = await create(rec({ applicationId: 'MH2026-50012', candidateName: 'Revoked Person' }));
   assert.equal((await call('POST', Q(`/records/${revoked.json.data.record.id}/revoke`), { remarks: 'Entered from the wrong list' }, A.officer2C)).status, 200);
   const taken = 'MH2026-50001';   // linked to Asha in the earlier test
@@ -272,16 +261,13 @@ test('a student can change or withdraw a pending submission; one pending claim a
   assert.equal((await call('DELETE', '/api/cap-details', undefined, s.cookie)).status, 404);
 });
 
-test('claims waiting on an ID are linked when a record is added and verified later (even from a CSV import)', async () => {
+test('claims waiting on an ID are linked immediately when a record is imported from CSV', async () => {
   const s = await student('Late Record');
   await claim(s, 'MH2026-70100');
   assert.equal((await state(s)).verification.status, 'pending');
   const imp = await call('POST', Q('/records/import'), { csv: 'MH2026-70100,LATE RECORD,COEP,Computer,Round 2,Allotted' }, A.officerC);
   assert.equal(imp.json.data.created, 1);
-  assert.equal((await state(s)).verification.status, 'pending', 'imported records are pending too');
-  assert.equal((await call('GET', Q('/claims'), undefined, A.officerC)).json.data.items.find((c) => c.student.id === s.id).reason, 'not_verified');
-  const id = db.prepare("SELECT id FROM cap_allotment_records WHERE application_id = 'MH2026-70100'").get().id;
-  await verify(id);
+  assert.equal((await state(s)).verification.status, 'verified', 'imported records are immediately trusted');
   assert.equal((await state(s)).capDetails.capRound, 'Round 2');
 });
 
@@ -380,7 +366,7 @@ test('CSV import: valid rows are created pending; bad rows and duplicates are sk
   assert.match(why[8], /Expected 6 columns/);
   assert.match(why[9], /CAP round/);
   const rows = db.prepare("SELECT * FROM cap_allotment_records WHERE application_id IN ('MH2026-52002', 'MH2026-52003') ORDER BY application_id").all();
-  assert.deepEqual(rows.map((x) => [x.candidate_name, x.status, x.source, x.source_note]), [['PATIL, ROHAN', 'pending_verification', 'csv_import', 'CET Cell list, Round 1'], ['JOSHI MEERA', 'pending_verification', 'csv_import', 'CET Cell list, Round 1']]);
+  assert.deepEqual(rows.map((x) => [x.candidate_name, x.status, x.source, x.source_note]), [['PATIL, ROHAN', 'verified', 'csv_import', 'CET Cell list, Round 1'], ['JOSHI MEERA', 'verified', 'csv_import', 'CET Cell list, Round 1']]);
   assert.equal(db.prepare("SELECT candidate_name FROM cap_allotment_records WHERE application_id = 'MH2026-52001'").get().candidate_name, 'Already Here');
   assert.equal(db.prepare("SELECT event FROM cap_record_history WHERE record_id = ?").get(rows[0].id).event, 'imported');
   assert.equal((await call('POST', Q('/records/import'), { csv: '' }, A.officerC)).status, 400);
@@ -413,7 +399,7 @@ test('corrections need remarks, keep the student in step, and are audited with b
   assert.deepEqual([after.capRound, after.allotmentStatus, after.allottedCollege], ['Round 2', 'Allotted (Float)', 'Corrected College Name']);
   assert.notEqual(after.capRound, before.capRound);
   const hist = (await call('GET', Q(`/records/${id}`), undefined, A.officerC)).json.data.history;
-  assert.deepEqual(hist.map((h) => h.event), ['edited', 'linked', 'verified', 'created']);
+  assert.deepEqual(hist.map((h) => h.event), ['edited', 'linked', 'created']);
   const edited = hist[0];
   assert.equal(edited.actorName, 'Omkar Officer');
   assert.equal(edited.remarks, 'Corrected from the Round 2 list');
@@ -421,7 +407,6 @@ test('corrections need remarks, keep the student in step, and are audited with b
   assert.deepEqual(edited.details.changes.allotmentStatus, { from: 'Allotted', to: 'Allotted (Float)' });
   assert.ok(hist.every((h) => h.createdAt && h.actorName));
   assert.equal(hist.find((h) => h.event === 'linked').actorType, 'student');
-  assert.equal(hist.find((h) => h.event === 'verified').actorName, 'Olga Officer');
   // the application ID of a linked record is locked
   const lock = await put({ ...rec({ applicationId: 'MH2026-53999', candidateName: 'Correction Student' }), remarks: 'Trying to change the ID' });
   assert.equal(lock.status, 409);
@@ -431,7 +416,7 @@ test('corrections need remarks, keep the student in step, and are audited with b
   const act = log.find((i) => i.action === 'cap.edit' && i.summary.includes('MH2026-53000'));
   assert.equal(act.admin.name, 'Omkar Officer');
   assert.equal(act.student.name, 'Correction Student');
-  assert.ok(['cap.create', 'cap.verify', 'cap.edit'].every((a) => log.some((i) => i.action === a)));
+  assert.ok(['cap.create', 'cap.edit'].every((a) => log.some((i) => i.action === a)));
 });
 
 test('unlinking removes the student\'s details and their waiting queue token; revoke and re-verify follow the rules', async () => {
@@ -463,12 +448,10 @@ test('unlinking removes the student\'s details and their waiting queue token; re
   assert.equal((await verify(id)).json.code, 'REVOKED');
   assert.equal((await call('POST', Q(`/records/${id}/revoke`), { remarks: 'Revoking again' }, A.officer2C)).json.code, 'ALREADY_REVOKED');
   const fix = await call('PUT', Q(`/records/${id}`), { ...rec({ applicationId: 'MH2026-54000', candidateName: 'Unlink Student', capRound: 'Round 2' }), remarks: 'Re-entered from the corrected list' }, A.officerC);
-  assert.equal(fix.json.data.record.status, 'pending_verification');
-  assert.equal((await verify(id, A.officerC)).json.code, 'FOUR_EYES');
-  assert.equal((await verify(id, A.officer2C)).status, 200);
+  assert.equal(fix.json.data.record.status, 'verified');
   assert.equal((await state(s)).capDetails.capRound, 'Round 2', 'the waiting student is linked again');
   const events = (await call('GET', Q(`/records/${id}`), undefined, A.officerC)).json.data.history.map((h) => h.event).reverse();
-  assert.deepEqual(events, ['created', 'verified', 'linked', 'unlinked', 'revoked', 'edited', 'verified', 'linked']);
+  assert.deepEqual(events, ['created', 'linked', 'unlinked', 'revoked', 'edited', 'linked']);
 });
 
 test('record list: filters and prefix search', async () => {
