@@ -1,4 +1,4 @@
-/* Login page. */
+/* Login page: CAP-based login. */
 (function () {
   const form = document.getElementById('login-form');
   const button = document.getElementById('login-btn');
@@ -8,7 +8,7 @@
 
   if (params.get('registered')) UI.showAlert('success', 'Account created successfully. Please log in.');
   else if (params.get('loggedout')) UI.showAlert('info', 'You have been logged out.');
-  if (params.get('email')) form.elements.email.value = params.get('email');
+  if (params.get('appId')) form.elements.applicationId.value = params.get('appId');
 
   function nextPage() {
     const next = params.get('next');
@@ -17,8 +17,7 @@
 
   function validate(data) {
     const errors = {};
-    if (!data.email) errors.email = 'Email is required.';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.email)) errors.email = 'Enter a valid email address.';
+    if (!data.applicationId) errors.applicationId = 'CAP Application ID is required.';
     if (!data.password) errors.password = 'Password is required.';
     return errors;
   }
@@ -28,7 +27,10 @@
     UI.clearAlert();
     UI.clearFieldErrors(form);
 
-    const data = { email: form.elements.email.value.trim(), password: form.elements.password.value };
+    const data = {
+      applicationId: form.elements.applicationId.value.trim(),
+      password: form.elements.password.value,
+    };
     const errors = validate(data);
     if (Object.keys(errors).length) {
       UI.setFieldErrors(form, errors);

@@ -9,7 +9,7 @@
   if (!student) { loading.classList.add('d-none'); return; }
 
   function actionLabel(item) {
-    if (item.key === 'physical_verification') return 'View status';
+    if (item.key === 'physical_verification') return ['not_started', 'correction_required'].includes(item.status) ? 'Request verification' : 'View status';
     if (item.key === 'document_preparation') return 'Open document checklist';
     if (item.key === 'fee_payment') return 'Update payment status';
     return 'Update status';

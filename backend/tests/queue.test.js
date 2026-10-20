@@ -18,6 +18,7 @@ const db = require('../config/db');
 const time = require('../utils/time');
 const adminAuthService = require('../services/adminAuthService');
 const queueService = require('../services/queueService');
+const { linkVerified } = require('./helpers/capHelper');
 
 let server; let base;
 test.before(async () => {
@@ -59,7 +60,7 @@ async function makeStudent(name, { round = 'Round 1', apptDate = today(), verifi
   const cookie = (await call('POST', '/api/auth/login', { email, password: 'Passw0rd123' })).cookie;
   const id = db.prepare('SELECT id FROM students WHERE email = ?').get(email).id;
   const appId = `MH2026-${5000 + seq}`;
-  assert.equal((await call('PUT', '/api/cap-details', { applicationId: appId, studentName: name, allottedCollege: 'COEP', courseBranch: 'Computer', capRound: round, allotmentStatus: 'Allotted' }, cookie)).status, 200);
+  linkVerified(id, { applicationId: appId, name, college: 'COEP', branch: 'Computer', round });
   let apptId = null;
   if (apptDate) {
     apptId = Number(db.prepare("INSERT INTO appointments (student_id, appointment_date, appointment_time, venue, created_by_name, updated_by_name) VALUES (?, ?, '10:00', 'Admission Cell', 'seed', 'seed')").run(id, apptDate).lastInsertRowid);
@@ -596,6 +597,45 @@ test('if the engine is unavailable the queue reports 503 but the student dashboa
   const back = await state();                      // recovers by itself and rebuilds from the database
   assert.deepEqual(back.waiting.map((t) => t.student.name), ['Jai Outage']);
   while ((await state()).waiting.length) await serveNext(1);
+});
+
+test('Task 5 reaches 6/6 only when an officer records the successful in-person outcome', async () => {
+  const student = await makeStudent('Task Five Queue Student');
+  assert.equal((await call('PUT', '/api/tasks/physical_verification', { action: 'submit' }, student.cookie)).status, 200);
+  for (const key of ['allotment_acceptance', 'admission_form', 'document_preparation', 'fee_payment']) {
+    db.prepare("INSERT INTO task_reviews (student_id, task_key, status) VALUES (?, ?, 'approved')").run(student.id, key);
+  }
+  assert.equal((await call('GET', '/api/dashboard', undefined, student.cookie)).json.data.progress.completed, 5);
+  const token = await checkIn(student);
+  assert.equal(token.status, 201);
+  assert.equal((await callNext(1)).status, 200);
+  assert.equal((await act(token.json.data.token.id, 'start')).status, 200);
+  assert.equal((await act(token.json.data.token.id, 'complete')).status, 200);
+  assert.equal((await call('GET', '/api/queue/my-token', undefined, student.cookie)).json.data.queue.token.status, 'completed');
+  let dashboard = (await call('GET', '/api/dashboard', undefined, student.cookie)).json.data;
+  assert.equal(dashboard.tasks.find((task) => task.key === 'physical_verification').status, 'pending_review');
+  assert.equal(dashboard.progress.completed, 5, 'a completed queue token is not an approval');
+
+  const outcome = await call('PUT', `/api/admin/students/${student.id}/verification`, { status: 'completed', remarks: 'All original documents matched.' }, adm.officerC);
+  assert.equal(outcome.status, 200);
+  assert.equal(outcome.json.data.verification.status, 'completed');
+  assert.equal(db.prepare('SELECT student_id, status FROM verification_records WHERE student_id = ?').get(student.id).status, 'completed');
+  assert.equal(outcome.json.data.tasks.find((task) => task.key === 'physical_verification').status, 'approved');
+  assert.equal(outcome.json.data.progress.completed, 6);
+  dashboard = (await call('GET', '/api/dashboard', undefined, student.cookie)).json.data;
+  assert.equal(dashboard.progress.completed, 6);
+  assert.equal(dashboard.nextStep, null);
+  assert.equal(dashboard.tasks.find((task) => task.key === 'physical_verification').status, 'approved');
+});
+
+test('Task 5 stays pending after unsuccessful verification outcomes or a missed visit', async () => {
+  const student = await makeStudent('Task Five Unsuccessful Student');
+  assert.equal((await call('PUT', '/api/tasks/physical_verification', { action: 'submit' }, student.cookie)).status, 200);
+  assert.equal((await call('PUT', `/api/admin/students/${student.id}/verification`, { status: 'in_progress', remarks: 'Original documents do not yet match.' }, adm.officerC)).status, 200);
+  assert.equal((await call('GET', '/api/tasks/physical_verification', undefined, student.cookie)).json.data.task.status, 'pending_review');
+  assert.equal((await call('PATCH', `/api/admin/appointments/${student.apptId}/status`, { status: 'missed', note: 'Student did not attend.' }, adm.officerC)).status, 200);
+  const dashboard = (await call('GET', '/api/dashboard', undefined, student.cookie)).json.data;
+  assert.equal(dashboard.tasks.find((task) => task.key === 'physical_verification').status, 'pending_review');
 });
 
 test('final consistency: no student ever held two active tokens, and every token has a unique number per day', async () => {

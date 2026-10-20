@@ -1,5 +1,6 @@
 'use strict';
 const capService = require('./capService');
+const capRecordService = require('./capRecordService');
 const checklistService = require('./checklistService');
 const applicationService = require('./applicationService');
 const appointmentService = require('./appointmentService');
@@ -7,28 +8,34 @@ const appointmentService = require('./appointmentService');
 /** CAP details count as the first task; the 5 checklist items follow. */
 function buildTasks(studentId) {
   const cap = capService.get(studentId);
+  const verification = capRecordService.studentState(studentId);
+  const waiting = verification.status === 'pending';
   const capTask = {
     key: 'cap_details',
     title: 'CAP Details',
-    description: 'Enter your CAP application and allotment details.',
-    guidance: 'Fill in the CAP Details form using your CAP allotment letter.',
+    description: 'Submit your CAP application ID. Your allotment details are filled in once the admission cell verifies it.',
+    guidance: 'Enter only your CAP application ID. Never enter your CAP portal password: AdmitFlow does not connect to the official CAP portal and will never ask for it.',
     required: true,
-    status: cap ? 'completed' : 'pending',
-    statusLabel: cap ? 'Submitted' : 'Not Entered',
-    statusSource: 'student',
-    editable: true,
-    summary: cap ? `${cap.capRound}, ${cap.allotmentStatus}` : null,
+    status: cap ? 'completed' : (waiting ? 'in_progress' : 'pending'),
+    statusLabel: cap ? 'Verified' : (waiting ? 'Verification Pending' : 'Not Submitted'),
+    statusSource: 'college',
+    editable: !cap,
+    summary: cap ? `${cap.capRound}, ${cap.allotmentStatus}` : (waiting ? `Application ID ${verification.applicationId} is waiting for verification` : null),
     link: 'cap-details.html',
   };
   const checklist = checklistService.getChecklist(studentId).map((item) => ({ ...item, link: 'checklist.html' }));
-  return { cap, tasks: [capTask, ...checklist] };
+  return { cap, verification, tasks: [capTask, ...checklist] };
+}
+
+function isTaskComplete(task) {
+  return task.status === 'completed' || task.status === 'approved';
 }
 
 function computeProgress(tasks) {
   const total = tasks.length;
-  const completed = tasks.filter((t) => t.status === 'completed').length;
-  const inProgress = tasks.filter((t) => t.status === 'in_progress').length;
-  const pending = tasks.filter((t) => t.status === 'pending').length;
+  const completed = tasks.filter(isTaskComplete).length;
+  const inProgress = tasks.filter((t) => ['in_progress', 'submitted', 'pending_review', 'correction_required'].includes(t.status)).length;
+  const pending = tasks.filter((t) => t.status === 'pending' || t.status === 'not_started').length;
   return {
     total,
     completed,
@@ -44,7 +51,7 @@ function getProgress(studentId) {
 }
 
 function getSummary(student) {
-  const { cap, tasks } = buildTasks(student.id);
+  const { cap, verification, tasks } = buildTasks(student.id);
   const progress = computeProgress(tasks);
   const cancelled = cap && cap.allotmentStatus === capService.CANCELLED_STATUS;
 
@@ -60,13 +67,19 @@ function getSummary(student) {
   else if (progress.completed === progress.total) overallStatus = 'Admission Process Complete';
 
   return {
-    student: { fullName: student.fullName, email: student.email },
+    student: {
+      id: student.id,
+      fullName: student.fullName,
+      applicationId: student.applicationId || (cap && cap.applicationId) || (verification && verification.applicationId) || null,
+      email: student.email,
+    },
     cap,
+    capVerification: verification,
     progress,
     tasks,
     application,
     appointment: cap ? appointmentService.getStudentView(student.id) : null,
-    nextStep: tasks.find((t) => t.status !== 'completed') || null,
+    nextStep: tasks.find((t) => !isTaskComplete(t)) || null,
     overallStatus,
     warning: cancelled
       ? 'Your CAP status is marked as "Seat Cancelled". Update your CAP details if this is incorrect.'

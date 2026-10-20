@@ -1,4 +1,4 @@
--- AdmitFlow database schema (Phase 2: Student Portal, Phase 3: College Admin Portal, Phase 4: Queue & Tokens)
+-- AdmitFlow database schema (Phase 2: Student Portal, Phase 3: College Admin Portal, Phase 4: Queue & Tokens, Phase 5: Undo stack)
 -- Applied automatically (idempotently) when the backend starts.
 
 CREATE TABLE IF NOT EXISTS students (
@@ -252,3 +252,131 @@ CREATE TABLE IF NOT EXISTS queue_meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- ===========================================================================
+-- Phase 5: Undo (additive). Every reversible admin action is recorded here. The LIFO stack that decides which
+-- action is undone next lives in the C++ engine (cpp_engine/include/dsa/stack.hpp) and is rebuilt from the
+-- 'active' rows of this table whenever the engine starts.
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS admin_undo_actions (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  admin_id    INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+  kind        TEXT    NOT NULL CHECK (kind IN ('review', 'reschedule')),
+  student_id  INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  target_id   INTEGER,                         -- appointment id for a reschedule
+  summary     TEXT    NOT NULL,
+  before_json TEXT    NOT NULL,                -- the state to restore
+  after_json  TEXT    NOT NULL,                -- the state the action produced (used to detect later changes)
+  status      TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'undone', 'discarded', 'expired')),
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_undo_admin ON admin_undo_actions(admin_id, status, id);
+
+-- ===========================================================================
+-- CAP allotment verification (additive).
+-- Students no longer type their allotment details. Trusted records are entered or imported by the college admission
+-- cell from the CAP allotment list, VERIFIED by an authorised admin, and only then linked to a student.
+-- AdmitFlow has no connection to the official CAP portal and never stores CAP portal credentials.
+-- Invariant kept by the code: a cap_details row exists only for a student linked to a VERIFIED record here.
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS cap_allotment_records (
+  id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+  application_id          TEXT    NOT NULL UNIQUE,             -- stored upper-case. This UNIQUE index IS the lookup structure.
+  candidate_name          TEXT    NOT NULL,
+  allotted_college        TEXT    NOT NULL,
+  course_branch           TEXT    NOT NULL,
+  cap_round               TEXT    NOT NULL,
+  allotment_status        TEXT    NOT NULL,
+  status                  TEXT    NOT NULL DEFAULT 'pending_verification'
+                          CHECK (status IN ('pending_verification', 'verified', 'revoked')),
+  source                  TEXT    NOT NULL CHECK (source IN ('manual_entry', 'csv_import', 'legacy_student_entry')),
+  source_note             TEXT,                                -- e.g. which list / round / date it came from
+  entered_by_admin_id     INTEGER REFERENCES admins(id) ON DELETE SET NULL,
+  entered_by_name         TEXT    NOT NULL,
+  last_changed_by_admin_id INTEGER REFERENCES admins(id) ON DELETE SET NULL,   -- four-eyes: this admin cannot verify
+  verified_by_admin_id    INTEGER REFERENCES admins(id) ON DELETE SET NULL,
+  verified_by_name        TEXT,
+  verified_at             TEXT,
+  linked_student_id       INTEGER REFERENCES students(id) ON DELETE SET NULL,
+  created_at              TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at              TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+-- one record per student, and (by the UNIQUE column above) one student per record
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cap_record_student ON cap_allotment_records(linked_student_id) WHERE linked_student_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_cap_records_status ON cap_allotment_records(status, id);
+
+-- Append-only audit trail of everything that happens to a record.
+CREATE TABLE IF NOT EXISTS cap_record_history (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_id  INTEGER NOT NULL REFERENCES cap_allotment_records(id) ON DELETE CASCADE,
+  event      TEXT    NOT NULL CHECK (event IN ('created', 'imported', 'edited', 'verified', 'revoked', 'linked', 'unlinked', 'migrated')),
+  actor_type TEXT    NOT NULL CHECK (actor_type IN ('admin', 'student', 'system')),
+  admin_id   INTEGER REFERENCES admins(id) ON DELETE SET NULL,
+  actor_name TEXT    NOT NULL,                                 -- snapshot, stays readable if the admin is removed
+  remarks    TEXT,
+  details    TEXT,                                             -- JSON, e.g. { changes: { cap_round: { from, to } } }
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cap_history_record ON cap_record_history(record_id, id);
+
+-- An application ID a student has submitted that is not (yet) linked: shown to the student as "verification pending".
+CREATE TABLE IF NOT EXISTS cap_claims (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id       INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  application_id   TEXT    NOT NULL,
+  status           TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'linked', 'rejected', 'withdrawn')),
+  reason           TEXT    NOT NULL DEFAULT 'not_found'
+                   CHECK (reason IN ('not_found', 'not_verified', 'revoked', 'name_mismatch', 'already_linked')),
+  resolution_note  TEXT,
+  resolved_by_name TEXT,
+  created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+  resolved_at      TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cap_claim_open ON cap_claims(student_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_cap_claims_app ON cap_claims(application_id, status);
+
+-- Simulated CAP login dummy credentials (for demo / simulation only).
+-- Plain passwords are never stored. Only salted scrypt hashes are stored.
+CREATE TABLE IF NOT EXISTS demo_cap_credentials (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  application_id TEXT    NOT NULL UNIQUE,
+  password_hash  TEXT    NOT NULL,
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_demo_cap_app ON demo_cap_credentials(application_id);
+
+-- ===========================================================================
+-- Task workflow + evidence uploads (additive). Tasks 2–6 are reviewed by officers.
+-- Student-reported form fields stay in checklist_items / task_records / document_status / fee_details.
+-- ===========================================================================
+CREATE TABLE IF NOT EXISTS task_reviews (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id            INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  task_key              TEXT    NOT NULL,
+  status                TEXT    NOT NULL DEFAULT 'not_started'
+                        CHECK (status IN ('not_started', 'submitted', 'pending_review', 'approved', 'correction_required')),
+  correction_reason     TEXT,
+  reviewed_by_name      TEXT,
+  reviewed_by_admin_id  INTEGER REFERENCES admins(id) ON DELETE SET NULL,
+  reviewed_at           TEXT,
+  updated_at            TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (student_id, task_key)
+);
+CREATE INDEX IF NOT EXISTS idx_task_reviews_status ON task_reviews(status, task_key);
+
+CREATE TABLE IF NOT EXISTS task_uploads (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id    INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  task_key      TEXT    NOT NULL,
+  slot          TEXT    NOT NULL,
+  original_name TEXT    NOT NULL,
+  mime_type     TEXT    NOT NULL,
+  size_bytes    INTEGER NOT NULL,
+  content       BLOB    NOT NULL,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (student_id, task_key, slot)
+);
+CREATE INDEX IF NOT EXISTS idx_task_uploads_student ON task_uploads(student_id, task_key);

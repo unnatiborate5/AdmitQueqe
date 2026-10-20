@@ -128,6 +128,32 @@ function reschedule(admin, id, v) {
   })();
 }
 
+function get(id) { return toDto(requireAppointment(id)); }
+
+/** Undo support (Phase 5): restores the slot an appointment had before a reschedule, if nothing has changed since. */
+function revertReschedule(admin, id, before, after) {
+  return db.transaction(() => {
+    const row = requireAppointment(id);
+    const stale = (msg) => new ApiError(409, msg, null, 'STALE_UNDO');
+    if (row.status !== 'scheduled') throw stale('This reschedule can no longer be undone: the appointment is no longer scheduled.');
+    if (row.appointment_date !== after.date || row.appointment_time !== after.time || row.venue !== after.venue) {
+      throw stale('This reschedule can no longer be undone: the appointment was changed after it.');
+    }
+    if (before.date < time.today()) throw stale('This reschedule can no longer be undone: the original date has already passed.');
+    db.prepare(
+      `UPDATE appointments SET appointment_date = ?, appointment_time = ?, venue = ?, instructions = ?, status_note = ?, reschedule_count = ?,
+         updated_by_name = ?, updated_at = datetime('now') WHERE id = ?`
+    ).run(before.date, before.time, before.venue, before.instructions || null, before.note || null, before.rescheduleCount, admin.fullName, id);
+    const student = studentOf(row.student_id);
+    activityService.log(admin, {
+      action: 'appointment.undo_reschedule', student,
+      summary: `Undid the reschedule for ${student.fullName}: back to ${before.date} ${before.time}`,
+      details: { appointmentId: id, from: { date: after.date, time: after.time, venue: after.venue }, to: { date: before.date, time: before.time, venue: before.venue } },
+    });
+    return toDto(requireAppointment(id));
+  })();
+}
+
 function updateStatus(admin, id, { status, note }) {
   return db.transaction(() => {
     const old = requireAppointment(id);
@@ -191,4 +217,4 @@ function upcoming(limit = 5) {
   ).all(time.today(), limit).map((r) => ({ ...toDto(r), student: { id: r.student_id, name: r.student_name } }));
 }
 
-module.exports = { STATUSES, LABELS, getActive, listForStudent, getStudentView, schedule, reschedule, updateStatus, list, upcoming };
+module.exports = { STATUSES, LABELS, get, revertReschedule, getActive, listForStudent, getStudentView, schedule, reschedule, updateStatus, list, upcoming };

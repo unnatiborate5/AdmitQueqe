@@ -8,18 +8,24 @@
 
   function actionLabel(task) {
     switch (task.key) {
-      case 'cap_details': return task.status === 'completed' ? 'Edit details' : 'Enter CAP details';
+      case 'cap_details': return 'View CAP Details';
       case 'document_preparation': return 'Open document checklist';
-      case 'physical_verification': return 'View status';
+      case 'physical_verification': return ['not_started', 'correction_required'].includes(task.status) ? 'Request verification' : 'View status';
       case 'fee_payment': return 'Update payment status';
       default: return 'Update status';
     }
   }
 
-  const openTask = (key) => Tasks.open(key, {
-    studentName: student.fullName,
-    onSaved: (message) => { refresh(message); },
-  });
+  const openTask = (key) => {
+    if (key === 'cap_details') {
+      window.location.href = 'cap-details.html';
+      return;
+    }
+    Tasks.open(key, {
+      studentName: student.fullName,
+      onSaved: (message) => { refresh(message); },
+    });
+  };
 
   function renderTasks(tasks) {
     return `<ol class="task-list">${tasks.map((t, i) => `
@@ -39,15 +45,19 @@
       </li>`).join('')}</ol>`;
   }
 
-  function renderCap(cap) {
+  function renderCap(cap, verification) {
     if (!cap) {
+      const pending = verification && verification.status === 'pending';
+      const appId = (verification && verification.applicationId) || '';
       return `<h2 class="panel-title">CAP allotment</h2>
-        <p class="text-muted mb-3">You have not entered your CAP details yet.</p>
-        <button type="button" class="btn btn-primary btn-sm" data-open-task="cap_details">Enter CAP details</button>`;
+        ${pending ? `<p class="mb-2"><span class="status-pill in_progress">Verification pending</span></p>
+          <p class="text-muted small mb-3">Application ID <strong>${UI.esc(appId)}</strong> is waiting for the college admission cell. Your allotment details appear here automatically once it is verified.</p>`
+    : '<p class="text-muted mb-3">Your allotment record is awaiting verification by the admission cell.</p>'}
+        <a href="cap-details.html" class="btn btn-primary btn-sm" id="view-cap-details-card-btn">View CAP Details</a>`;
     }
     return `<div class="d-flex justify-content-between align-items-start mb-2">
         <h2 class="panel-title mb-0">CAP allotment</h2>
-        <button type="button" class="btn btn-link btn-sm p-0" data-open-task="cap_details">Edit</button>
+        <span class="status-pill completed">Verified</span>
       </div>
       <dl class="cap-summary mt-3">
         <dt>Allotted college</dt><dd>${UI.esc(cap.allottedCollege)}</dd>
@@ -55,8 +65,10 @@
         <dt>CAP round</dt><dd>${UI.esc(cap.capRound)}</dd>
         <dt>Allotment status</dt><dd>${UI.esc(cap.allotmentStatus)}</dd>
         <dt>Application ID</dt><dd>${UI.esc(cap.applicationId)}</dd>
-        <dt>Student name</dt><dd class="mb-0">${UI.esc(cap.studentName)}</dd>
-      </dl>`;
+        <dt>Name on the CAP list</dt><dd class="mb-0">${UI.esc(cap.studentName)}</dd>
+      </dl>
+      <a href="cap-details.html" class="btn btn-outline-primary btn-sm mt-3" id="view-cap-details-card-btn">View CAP Details</a>
+      <p class="small text-muted mt-2 mb-0">Verified by the college admission cell. These details cannot be edited here.</p>`;
   }
 
   function renderNext(next, allDone) {
@@ -193,22 +205,28 @@
 
   function render(d) {
     queueState = d.queue || null;
-    const firstName = String(d.student.fullName).split(' ')[0];
+    const studentName = d.student.fullName || '';
+    const studentAppId = d.student.applicationId || (d.cap && d.cap.applicationId) || (d.capVerification && d.capVerification.applicationId) || '';
     const p = d.progress;
     root.innerHTML = `
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-4">
         <div>
-          <h1 class="page-title mb-1">Welcome, ${UI.esc(firstName)}</h1>
-          <p class="text-muted mb-0">Your admission progress after CAP allotment.</p>
+          <h1 class="page-title mb-1">Welcome, ${UI.esc(studentName)}</h1>
+          <p class="text-muted mb-0">CAP Application ID: <strong id="student-cap-app-id">${UI.esc(studentAppId)}</strong> &middot; Admission progress after CAP allotment.</p>
         </div>
-        <span class="status-pill ${overallClass(d)} fs-6">${UI.esc(d.overallStatus)}</span>
+        <div class="d-flex align-items-center gap-2">
+          <a href="cap-details.html" class="btn btn-outline-primary btn-sm" id="view-cap-details-btn">View CAP Details</a>
+          <span class="status-pill ${overallClass(d)} fs-6">${UI.esc(d.overallStatus)}</span>
+        </div>
       </div>
 
       ${d.warning ? `<div class="alert alert-warning" role="alert">${UI.esc(d.warning)}</div>` : ''}
       ${renderReviewBanner(d.application)}
-      ${!d.cap ? `<div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-2" role="status">
-          <span>Start by entering your CAP details so we can set up your checklist.</span>
-          <button type="button" class="btn btn-primary btn-sm" data-open-task="cap_details">Enter CAP details</button></div>` : ''}
+      ${!d.cap ? `<div class="alert ${d.capVerification && d.capVerification.status === 'pending' ? 'alert-warning' : 'alert-info'} d-flex flex-wrap justify-content-between align-items-center gap-2" role="status">
+          <span>${d.capVerification && d.capVerification.status === 'pending'
+    ? '<strong>Verification pending.</strong> The admission cell has not verified your CAP application ID yet. Your checklist is set up automatically once it is verified.'
+    : 'Your CAP allotment record is awaiting verification by the admission cell.'}</span>
+          <a href="cap-details.html" class="btn btn-primary btn-sm" id="banner-cap-details-btn">View CAP Details</a></div>` : ''}
 
       <section class="panel mb-4" aria-label="Progress tracker">
         <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-3">
@@ -236,7 +254,7 @@
           <section class="panel mb-4">${renderNext(d.nextStep, p.completed === p.total)}</section>
           ${d.application ? `<section class="panel mb-4" aria-label="College review">${renderReviewPanel(d.application)}</section>` : ''}
           ${d.cap ? `<section class="panel mb-4" aria-label="Verification appointment">${renderAppointment(d.appointment)}</section>` : ''}
-          <section class="panel mb-4">${renderCap(d.cap)}</section>
+          <section class="panel mb-4">${renderCap(d.cap, d.capVerification)}</section>
           <div class="manual-note"><strong>Original documents are verified in person.</strong> Visit your college for physical verification. The college records the result, and it appears here automatically.</div>
         </div>
       </div>`;

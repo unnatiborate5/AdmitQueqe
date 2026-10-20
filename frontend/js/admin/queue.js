@@ -8,6 +8,7 @@
 
   const canOperate = Admin.can(admin, 'queue:operate');
   const canConfigure = Admin.can(admin, 'queue:configure');
+  const canRecordOutcome = Admin.can(admin, 'verification:record');
   const API = '/api/admin/queue';
   let data = null;
   let built = false;
@@ -39,7 +40,7 @@
       }
       if (t && t.status === 'serving') {
         buttons.push(`<button class="btn btn-primary btn-sm" data-act="complete" data-token="${t.id}">Complete</button>`);
-        buttons.push(`<a class="btn btn-outline-primary btn-sm" href="student.html?id=${t.student.id}">Record outcome</a>`);
+        if (canRecordOutcome) buttons.push(`<button class="btn btn-outline-primary btn-sm" data-act="record-outcome" data-token="${t.id}">Record outcome</button>`);
       }
       if (!(t && t.status === 'serving')) buttons.push(`<button class="btn btn-outline-secondary btn-sm" data-act="toggle" data-counter="${c.id}" data-open="${c.isOpen ? 0 : 1}">${c.isOpen ? 'Close counter' : 'Open counter'}</button>`);
     }
@@ -64,7 +65,7 @@
     if (!list.length) return '<div class="empty-state py-4">No finished tokens yet today.</div>';
     return `<div class="table-responsive"><table class="table admin-table align-middle"><thead><tr><th>Token</th><th>Student</th><th>Result</th><th>Counter</th><th>Issued</th><th>Finished</th></tr></thead><tbody>
       ${list.map((t) => `<tr><td><span class="code-chip">${esc(t.code)}</span></td><td>${studentLink(t)}</td>
-        <td>${Admin.tokenPill(t.status)}${t.finishReason ? `<div class="cell-sub">${esc(t.finishReason)}</div>` : ''}</td>
+        <td>${Admin.tokenPill(t.status)}${t.finishReason ? `<div class="cell-sub">${esc(t.finishReason)}</div>` : ''}${t.status === 'completed' && canRecordOutcome ? `<button class="btn btn-outline-primary btn-sm d-block mt-2" data-act="record-outcome" data-token="${t.id}">Record in-person outcome</button>` : ''}</td>
         <td>${esc(t.counter ? t.counter.name : '-')}</td><td class="small">${esc(when(t.createdAt))}</td><td class="small">${esc(when(t.finishedAt))}</td></tr>`).join('')}</tbody></table></div>`;
   }
 
@@ -161,12 +162,14 @@
   // ---------------- actions ----------------
   async function run(request, okMessage) {
     UI.clearAlert();
+    let message = null;
     try {
       const res = await request();
-      UI.showAlert('success', okMessage ? okMessage(res) : res.message);
+      message = okMessage ? okMessage(res) : res.message;
     } catch (err) { Admin.handleError(err); }
     busy = false;
-    await load(true);
+    await load(true);                              // refresh first, so the page already shows the new state ...
+    if (message) UI.showAlert('success', message); // ... when the confirmation appears
   }
 
   function noteDialog({ title, intro, label, confirm, danger, request, message }) {
@@ -185,7 +188,39 @@
   }
 
   function tokenOf(id) {
-    return [...data.waiting, ...data.counters.map((c) => c.token).filter(Boolean)].find((t) => t.id === Number(id));
+    return [...data.waiting, ...data.counters.map((c) => c.token).filter(Boolean), ...data.finished].find((t) => t.id === Number(id));
+  }
+
+  function openOutcomeDialog(t) {
+    const m = Modal.open({ title: `Record outcome: ${t.code}` });
+    m.body.innerHTML = `<form id="q-outcome-form" novalidate>
+      <p class="manual-note small">Record the result of the officer's in-person original-document check for ${esc(t.student.name)}. Completing a queue token alone does not approve Task 5.</p>
+      <div class="mb-3"><label class="form-label fw-semibold" for="q-outcome-status">Outcome</label>
+        <select class="form-select" id="q-outcome-status" name="status"><option value="completed">Verified at college</option><option value="in_progress">Verification in progress</option><option value="pending">Not verified (reset)</option></select><div class="invalid-feedback"></div></div>
+      <div class="mb-1"><label class="form-label fw-semibold" for="q-outcome-remarks">Remarks (optional; required when resetting)</label>
+        <textarea class="form-control" id="q-outcome-remarks" name="remarks" rows="2" maxlength="300"></textarea><div class="invalid-feedback"></div></div>
+    </form>`;
+    m.footer.innerHTML = '<button type="button" class="btn btn-outline-secondary" data-x="cancel">Cancel</button><button type="submit" class="btn btn-primary" form="q-outcome-form">Save outcome</button>';
+    m.footer.querySelector('[data-x=cancel]').addEventListener('click', () => m.close());
+    const form = m.body.querySelector('form');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      UI.clearFieldErrors(form); m.alertArea.innerHTML = '';
+      const button = m.footer.querySelector('[type=submit]');
+      UI.setLoading(button, true, 'Saving'); m.setBusy(true);
+      try {
+        const res = await Api.put(`/api/admin/students/${t.student.id}/verification`, {
+          status: form.elements.status.value, remarks: form.elements.remarks.value,
+        });
+        m.setBusy(false); m.close();
+        await load(true);
+        UI.showAlert('success', res.message);
+      } catch (err) {
+        m.setBusy(false); UI.setLoading(button, false);
+        UI.setFieldErrors(form, err.errors); UI.showAlertIn(m.alertArea, 'danger', err.message);
+      }
+    });
+    Modal.focusFirst(m);
   }
 
   function addCounterDialog() {
@@ -197,7 +232,7 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       UI.clearFieldErrors(form);
-      try { const res = await Api.post(`${API}/counters`, { name: form.elements.name.value }); m.close(); UI.showAlert('success', res.message); await load(true); }
+      try { const res = await Api.post(`${API}/counters`, { name: form.elements.name.value }); m.close(); await load(true); UI.showAlert('success', res.message); }
       catch (err) { UI.setFieldErrors(form, err.errors); UI.showAlertIn(m.alertArea, 'danger', err.message); }
     });
     Modal.focusFirst(m);
@@ -232,9 +267,10 @@
     if (act === 'call') { b.disabled = true; run(() => Api.post(`${API}/counters/${b.dataset.counter}/call-next`, {})); return; }
     if (act === 'toggle') { b.disabled = true; run(() => Api.patch(`${API}/counters/${b.dataset.counter}`, { isOpen: b.dataset.open === '1' }), (r) => `${r.message}${r.data.returned.length ? ` ${r.data.returned.join(', ')} went back to the queue.` : ''}`); return; }
     if (act === 'start') { b.disabled = true; run(() => Api.post(`${API}/tokens/${b.dataset.token}/start`, {})); return; }
-    if (act === 'complete') { b.disabled = true; run(() => Api.post(`${API}/tokens/${b.dataset.token}/complete`, {})); return; }
+    if (act === 'complete') { b.disabled = true; run(() => Api.post(`${API}/tokens/${b.dataset.token}/complete`, {}), () => 'Queue visit completed. Record the in-person verification outcome to finish Task 5.'); return; }
     const t = tokenOf(b.dataset.token);
     if (!t) return;
+    if (act === 'record-outcome') { openOutcomeDialog(t); return; }
     if (act === 'noshow') {
       noteDialog({ title: `No-show: ${t.code}`, intro: `${esc(t.student.name)} was called to ${esc(t.counter ? t.counter.name : 'the counter')} but did not arrive. The counter becomes free. They can get a new token at the back of the queue.`, label: 'Note (optional)', confirm: 'Mark as no-show', danger: true, request: (note) => Api.post(`${API}/tokens/${t.id}/no-show`, { note }) });
     }

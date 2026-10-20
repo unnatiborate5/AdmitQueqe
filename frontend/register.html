@@ -18,39 +18,26 @@
     </div>
   </header>
 
-  <main class="auth-wrap wide">
+  <main class="auth-wrap">
     <h1 class="page-title mb-1">Create your account</h1>
-    <p class="text-muted mb-4">It takes a minute. You will enter your CAP details after logging in.</p>
+    <p class="text-muted mb-4">Register with your CAP Application ID and authorized demo password.</p>
     <div id="alert-area"></div>
 
     <form id="register-form" class="panel" novalidate>
       <div class="mb-3">
-        <label for="fullName" class="form-label fw-semibold">Full name</label>
-        <input type="text" class="form-control" id="fullName" name="fullName" autocomplete="name" maxlength="100" required>
+        <label for="applicationId" class="form-label fw-semibold">CAP Application ID</label>
+        <input type="text" class="form-control" id="applicationId" name="applicationId" autocomplete="username" maxlength="20" placeholder="e.g. MH2026-10001" required>
         <div class="invalid-feedback"></div>
-      </div>
-      <div class="row">
-        <div class="col-md-7 mb-3">
-          <label for="email" class="form-label fw-semibold">Email</label>
-          <input type="email" class="form-control" id="email" name="email" autocomplete="email" maxlength="254" required>
-          <div class="invalid-feedback"></div>
-        </div>
-        <div class="col-md-5 mb-3">
-          <label for="phone" class="form-label fw-semibold">Mobile number</label>
-          <input type="tel" class="form-control" id="phone" name="phone" autocomplete="tel" inputmode="numeric" placeholder="10 digits" required>
-          <div class="invalid-feedback"></div>
-        </div>
+        <div class="form-text">As printed on your admission-cell CAP allotment list.</div>
       </div>
       <div class="mb-3">
-        <label for="password" class="form-label fw-semibold">Password</label>
-        <input type="password" class="form-control" id="password" name="password" autocomplete="new-password" required>
+        <label for="password" class="form-label fw-semibold">CAP Password</label>
+        <input type="password" class="form-control" id="password" name="password" autocomplete="new-password" placeholder="Configured demo password" required>
         <div class="invalid-feedback"></div>
-        <div class="form-text">At least 8 characters, with a letter and a number.</div>
+        <div class="form-text">Authentication is checked only against authorized demo credentials.</div>
       </div>
-      <div class="mb-4">
-        <label for="confirmPassword" class="form-label fw-semibold">Confirm password</label>
-        <input type="password" class="form-control" id="confirmPassword" name="confirmPassword" autocomplete="new-password" required>
-        <div class="invalid-feedback"></div>
+      <div class="alert alert-info py-2 small mb-4">
+        <strong>Notice:</strong> AdmitFlow is an internal college admission portal and does not connect to the official Maharashtra State CET CAP portal. Only enter authorized demo credentials; never enter real government CAP passwords.
       </div>
       <button type="submit" class="btn btn-primary w-100" id="register-btn">Create account</button>
     </form>

@@ -41,6 +41,8 @@ bool parseStatus(const std::string& s, Status& out) {
 
 }  // namespace
 
+std::string jsonEscape(const std::string& s) { return esc(s); }
+
 std::string tokenJson(const TokenView& v) {
   const Token& t = v.token;
   std::ostringstream o;

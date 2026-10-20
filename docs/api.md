@@ -1,4 +1,4 @@
-# AdmitFlow API (Phase 2 - Student Portal, Phase 3 - Admin Portal, Phase 4 - Queue)
+# AdmitFlow API (Phase 2 - Student Portal, Phase 3 - Admin Portal, Phase 4 - Queue, Phase 5 - Search / Planner / Undo)
 
 Base path: `/api`. All responses are JSON: `{ "success": true|false, "message"?, "data"?, "errors"?, "code"? }`.
 Authentication uses an HttpOnly session cookie (`admitflow_sid`, 7 days) set by `POST /auth/login`.
@@ -10,8 +10,9 @@ Authentication uses an HttpOnly session cookie (`admitflow_sid`, 7 days) set by 
 | POST | `/auth/login` | no | Log in (`email, password`). 200 / 400 / 401 |
 | POST | `/auth/logout` | no | End session, clear cookie |
 | GET | `/auth/me` | yes | Current student |
-| GET | `/cap-details` | yes | Saved CAP details (or `null`) plus dropdown `options` |
-| PUT | `/cap-details` | yes | Create/update CAP details. 400 / 409 (Application ID used by another account) |
+| GET | `/cap-details` | yes | `{ capDetails, verification }`. `capDetails` is the verified, read-only record (or `null`); `verification.status` is `verified`, `pending`, `rejected` or `none` (with a message) |
+| PUT | `/cap-details` | yes | Body: **only** `applicationId`. Links a verified, unlinked record with a matching name (`data.result: "linked"`), otherwise records a claim (`"pending"`, same response whatever the reason). Any other field (college, branch, round, status, a password, ...) is refused with 400 `READ_ONLY_FIELDS`. 400 bad ID, 409 `ALREADY_LINKED`, 429 `RATE_LIMITED` |
+| DELETE | `/cap-details` | yes | Withdraws the student's pending claim (404 `NO_PENDING_CLAIM` if none) |
 | GET | `/checklist` | yes | The 5 checklist items (status, summary line) + progress. 409 `CAP_DETAILS_REQUIRED` until CAP details exist |
 | GET | `/tasks/:taskKey` | yes | Everything a task window needs (current status + saved details). 404 / 409 |
 | PUT | `/tasks/:taskKey` | yes | Save a task form. 400 / 403 / 404 / 409 |
@@ -34,7 +35,7 @@ Task keys: `allotment_acceptance`, `admission_form`, `document_preparation`, `ph
 
 | Task | Source of truth |
 |---|---|
-| CAP details | `cap_details` row exists |
+| CAP details | `cap_details` row exists (it exists only for a student linked to a VERIFIED record) |
 | Allotment acceptance, Admission form, Fee payment | `checklist_items.status` (written by the task form) plus `task_records` / `fee_details` |
 | Document preparation | derived from `document_status` |
 | Physical verification | `verification_records` - never written by the student portal |
@@ -156,3 +157,55 @@ Students only ever see their own token. Admin queue changes (call, start, no-sho
 Level 1: verification status "in progress" (returning student). Level 2: CAP round "Round 3" or "Special Round". Level 3: everyone else.
 Levels 1-2 use the priority lane (binary heap ordered by level then arrival); level 3 uses the regular lane (FIFO).
 After `QUEUE_PRIORITY_BURST` (default 3) priority calls in a row, the oldest regular student is called next.
+
+
+---
+
+# Phase 5: Search, planner and undo (`/api/admin`)
+
+All answered by the C++ engine. Same session cookie and CSRF rules as the rest of the admin API.
+If the engine cannot start, these endpoints answer 503 `ENGINE_UNAVAILABLE`; everything else keeps working.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/search?q=` | students:view | 2-60 characters (letters, digits, spaces, `. ' -`). Runs token search (if `q` looks like `R012`), application-ID prefix search (binary search) and name search (linear search). Returns `results[]` (`id, name, applicationId, reviewStatus, token, matchedBy`), `total`, `truncated` (max 15 returned) and `algorithms[]` (`field, algorithm, comparisons, searched, matches`) |
+| GET | `/planner/unscheduled` | students:view | Students still needing an appointment, merge-sorted by priority level, longest waiting, name. `items[]` have `rank, level, priorityReason, waitingSince`; `algorithm` = `{name, comparisons, items}` |
+| GET | `/planner/arrivals?sort=time\|priority\|token` | students:view | Today's appointments, merge-sorted (default `time`; unknown values fall back to `time`). Items include the student's token and token status |
+| GET | `/planner/load?from=YYYY-MM-DD&days=1-31` | students:view | Appointment load as a SPARSE matrix (days x 48 half-hour slots): `cells` (non-zero only), `dayTotals`, `slotTotals`, `busiest`, `suggestions` (least busy slot per day in office hours 09:00-17:00) and `matrix` (`storedCells`, `totalCells`, `density`, `lookupComparisons`). Defaults: today, 14 days |
+| GET | `/planner/documents` | students:view | Document readiness as a DENSE matrix (9 documents x 4 CAP rounds): `documents[].ready/percent`, `rounds[].students`, `weakest[]` |
+| GET | `/undo` | applications:review | The admin's own undo stack, newest first: `items[]` (`id, kind, summary, studentName, createdAt`), `size`, `capacity` (20), `next` |
+| POST | `/undo` | applications:review | Undoes the newest entry. 409 `NOTHING_TO_UNDO`; 409 `STALE_UNDO` when the record changed since (the entry is removed from the stack) |
+
+Reversible actions (recorded automatically): `POST /students/:id/review` and `PUT /appointments/:id` (reschedule).
+
+## New table
+
+`admin_undo_actions` (`kind` = review | reschedule, `before_json`, `after_json`, `status` = active | undone | discarded | expired). The stacks themselves live in the engine and are rebuilt from the active rows on start.
+
+## Engine commands added (see `cpp_engine/include/toolkit.hpp`)
+
+`INDEX_CLEAR/ADD/TOKENS/BUILD`, `SEARCH_APP/TOKEN/NAME`, `SORT <mode>`, `STACK_PUSH/POP/PEEK/LIST/CLEAR_ALL`, `APPT_LOAD`, `DOC_READINESS`. The Phase 4 queue commands are unchanged.
+
+
+---
+
+# CAP allotment verification (`/api/admin/cap`)
+
+Trusted allotment records, student claims and an audit history. AdmitFlow is not connected to the official CAP portal and stores no CAP credentials.
+New permissions: `cap:view`, `cap:manage` (add, import, correct, unlink, resolve claims), `cap:verify` (verify, revoke). Super admins and admission officers have all three; **viewers have none**.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/cap/records` | cap:view | Query: `status` (`pending_verification`/`verified`/`revoked`), `linked` (`yes`/`no`), `search` (application-ID prefix or name), `page`. Returns `items[]`, `counts`, `pendingClaims`, `options` |
+| GET | `/cap/records/:id` | cap:view | Record plus its full audit `history` (event, admin/student/system, remarks, before/after `details`) |
+| POST | `/cap/records` | cap:manage | `applicationId, candidateName, allottedCollege, courseBranch, capRound, allotmentStatus, sourceNote?`. Creates a **pending** record. 409 `DUPLICATE_APPLICATION_ID` |
+| POST | `/cap/records/import` | cap:manage | `{ csv, sourceNote? }`: columns `application_id, candidate_name, allotted_college, course_branch, cap_round, allotment_status`, header optional, max 500 rows. Never overwrites. Returns `created` and `skipped[]` (`line`, `applicationId`, `reason`) |
+| PUT | `/cap/records/:id` | cap:manage | A correction: the six fields + **`remarks` (required)**. Keeps a verified record verified and updates the linked student; a revoked record returns to pending. 400 `NO_CHANGE`, 409 `LINKED_ID_LOCKED` / `DUPLICATE_APPLICATION_ID` |
+| POST | `/cap/records/:id/verify` | cap:verify | Optional `remarks`. Waiting students with a matching name are linked. 403 `FOUR_EYES` if you were the last to change it (super admins exempt); 409 `ALREADY_VERIFIED` / `REVOKED` |
+| POST | `/cap/records/:id/revoke` | cap:verify | `remarks` required. 409 `UNLINK_FIRST` if a student is linked |
+| POST | `/cap/records/:id/unlink` | cap:manage | `remarks` required. Removes the student's CAP details (and takes a waiting queue token out of the queue). 409 `NOT_LINKED` |
+| GET | `/cap/claims` | cap:view | `status` (default `pending`). Each claim shows the student, the submitted ID, the reason it waits (`not_found`, `not_verified`, `revoked`, `name_mismatch`, `already_linked`) and the record's state |
+| POST | `/cap/claims/:id/approve` | cap:manage | Links the student to the verified record; `remarks` required when the name differs |
+| POST | `/cap/claims/:id/reject` | cap:manage | `note` required; shown to the student |
+
+`GET /api/dashboard` (student) now also returns `capVerification` (the same object as `verification` above), and the CAP task shows `Verification Pending` while a claim waits. Every action is also written to the admin activity history (group `cap`). Tables: `cap_allotment_records` (UNIQUE `application_id`), `cap_record_history`, `cap_claims`.

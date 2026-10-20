@@ -25,19 +25,22 @@
 
     <form id="login-form" class="panel" novalidate>
       <div class="mb-3">
-        <label for="email" class="form-label fw-semibold">Email</label>
-        <input type="email" class="form-control" id="email" name="email" autocomplete="email" required>
+        <label for="applicationId" class="form-label fw-semibold">CAP Application ID</label>
+        <input type="text" class="form-control" id="applicationId" name="applicationId" autocomplete="username" maxlength="20" placeholder="e.g. MH2026-10001" required>
         <div class="invalid-feedback"></div>
       </div>
-      <div class="mb-4">
-        <label for="password" class="form-label fw-semibold">Password</label>
+      <div class="mb-3">
+        <label for="password" class="form-label fw-semibold">CAP Password</label>
         <input type="password" class="form-control" id="password" name="password" autocomplete="current-password" required>
         <div class="invalid-feedback"></div>
+      </div>
+      <div class="alert alert-info py-2 small mb-4">
+        <strong>Notice:</strong> Use your CAP Application ID and authorized local demo password. Never enter real government CAP passwords.
       </div>
       <button type="submit" class="btn btn-primary w-100" id="login-btn">Log in</button>
     </form>
 
-    <p class="text-center text-muted mt-3">New here? <a href="register.html">Create an account</a></p>
+    <p class="text-center text-muted mt-3">New here? <a href="register.html">Register with CAP ID</a></p>
     <p class="text-center small mt-4"><a href="admin/login.html">College staff? Admin log in</a></p>
   </main>
 

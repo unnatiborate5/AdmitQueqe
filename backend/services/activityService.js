@@ -27,7 +27,7 @@ const toDto = (r) => ({
   createdAt: r.created_at,
 });
 
-const GROUPS = ['auth', 'application', 'appointment', 'verification', 'queue'];
+const GROUPS = ['auth', 'application', 'appointment', 'verification', 'queue', 'cap'];
 
 function list(query) {
   const { page, pageSize, offset } = parsePaging(query, { defaultSize: 25, maxSize: 100 });

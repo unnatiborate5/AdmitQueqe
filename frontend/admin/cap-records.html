@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/admin.css">
+  <title>CAP records - AdmitFlow Admin</title>
+</head>
+<body>
+  <div id="app-navbar"></div>
+  <main class="container py-4">
+    <div id="alert-area"></div>
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+      <div>
+        <h1 class="page-title mb-1">CAP allotment records</h1>
+        <p class="text-muted mb-0">Trusted records students are linked to. Students never type their own allotment details: they submit an application ID, and are linked only when a <strong>verified</strong> record matches.
+          AdmitFlow is not connected to the official CAP portal: enter or import records from the CAP allotment list, and have a different admin verify them.</p>
+      </div>
+      <div class="d-flex gap-2" id="cap-actions"></div>
+    </div>
+    <section class="panel mb-3">
+      <div class="pill-tabs mb-3" id="cap-tabs" role="tablist" aria-label="CAP record status"></div>
+      <div class="filter-bar" id="cap-filters">
+        <div class="search"><label for="f-search" class="form-label small fw-semibold mb-1">Search</label>
+          <input type="search" class="form-control" id="f-search" placeholder="Application ID (prefix) or candidate name" maxlength="60" autocomplete="off"></div>
+        <div><label for="f-linked" class="form-label small fw-semibold mb-1">Linked student</label>
+          <select class="form-select" id="f-linked"><option value="">All</option><option value="yes">Linked</option><option value="no">Not linked</option></select></div>
+      </div>
+    </section>
+    <section class="panel table-panel" aria-live="polite">
+      <div class="table-responsive"><table class="table admin-table align-middle" id="cap-table"></table></div>
+      <div class="pager" id="pager"></div>
+    </section>
+  </main>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/ui.js"></script>
+  <script src="../js/modal.js"></script>
+  <script src="../js/admin/admin-common.js"></script>
+  <script src="../js/admin/cap-records.js"></script>
+</body>
+</html>

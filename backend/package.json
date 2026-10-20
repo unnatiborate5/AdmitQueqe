@@ -1,6 +1,6 @@
 {
   "name": "admitflow-backend",
-  "version": "0.4.0",
+  "version": "0.5.1",
   "description": "AdmitFlow - Post-CAP College Admission Coordination & Queue Management System (backend)",
   "main": "server.js",
   "scripts": {

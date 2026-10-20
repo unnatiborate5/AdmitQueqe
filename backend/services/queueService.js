@@ -50,7 +50,8 @@ const POLICY = {
 // engine process management
 // ------------------------------------------------------------------------------------------------
 let client = null;
-let restoredDate = null;        // the day the engine currently holds; null = must be rebuilt from the database
+let restoredDate = null;
+const restoreHooks = [];        // other engine-backed features (search index, undo stacks) rebuild themselves after a restore        // the day the engine currently holds; null = must be rebuilt from the database
 let chain = Promise.resolve();
 
 const exclusive = (fn) => {
@@ -111,7 +112,11 @@ async function restore(today) {
   await engine(`SEQ ${lastSeq}`);
   await engine(`STREAK ${metaDate === today ? Number(metaStreak) || 0 : 0}`);
   restoredDate = today;
+  for (const hook of restoreHooks) await hook((line) => client.send(line));
 }
+
+/** Registers a function that runs (with a raw `send`) every time the engine's memory is rebuilt from the database. */
+function onRestore(fn) { restoreHooks.push(fn); }
 
 async function ensureReady() {
   const today = time.today();
@@ -133,11 +138,11 @@ function seedCounters() {
 }
 
 /** Runs `fn` exclusively with a ready engine. A real fault (not a business refusal) rebuilds the engine from the database. */
-function operate(fn) {
+function operate(fn, { reconcile: doReconcile = true } = {}) {
   return exclusive(async () => {
     try {
       await ensureReady();
-      await reconcile();
+      if (doReconcile) await reconcile();
       return await fn();
     } catch (err) {
       if (!(err instanceof ApiError)) {
@@ -210,6 +215,7 @@ function checkInProblem(studentId, today = time.today()) {
 
 /** For a WAITING token: why it is no longer valid, or null. */
 function staleReason(t) {
+  if (!db.prepare('SELECT 1 FROM cap_details WHERE student_id = ?').get(t.student_id)) return 'CAP details are no longer linked to this student';
   if (applicationService.getReview(t.student_id).status === 'rejected') return 'Application was rejected';
   const ver = db.prepare('SELECT status FROM verification_records WHERE student_id = ?').get(t.student_id);
   if (ver && ver.status === 'completed') return 'Physical verification was already completed';
@@ -483,11 +489,19 @@ function getTodayCounts() {
   return counts;
 }
 
+/**
+ * Runs `fn({ send })` exclusively with a ready engine, for the Phase 5 features (search, planner, undo stack).
+ * `send(line)` resolves with the engine's parsed reply, including { ok: false } refusals.
+ */
+function withEngine(fn) {
+  return operate(() => fn({ send: (line) => client.send(line) }), { reconcile: false });
+}
+
 // ------------------------------------------------------------------------------------------------
 function shutdown() { dropEngine(); }
 const __test = { killEngine: () => { if (client && client.child) client.child.kill('SIGKILL'); }, engineAlive: () => Boolean(client && client.alive), BURST };
 
 module.exports = {
   POLICY, STATUS_LABELS, checkInProblem, priorityFor, checkIn, callNext, transition, setCounterOpen, addCounter,
-  getState, lookup, listEligible, getStudentView, tokensForStudentToday, getTodayCounts, shutdown, __test,
+  getState, lookup, listEligible, getStudentView, tokensForStudentToday, getTodayCounts, withEngine, onRestore, shutdown, __test,
 };

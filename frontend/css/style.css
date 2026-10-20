@@ -82,7 +82,7 @@ h1, h2, h3, h4, h5 { letter-spacing: -0.01em; }
 /* ---------- Segmented progress bar (one segment per task) ---------- */
 .seg-bar { display: flex; gap: 6px; }
 .seg { flex: 1; height: 12px; border-radius: 6px; background: var(--af-line); }
-.seg.completed { background: var(--af-done); }
+.seg.completed, .seg.approved { background: var(--af-done); }
 .seg.in_progress { background: var(--af-progress); }
 .seg.pending { background: var(--af-line); }
 

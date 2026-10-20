@@ -8,6 +8,8 @@ const auth = require('../controllers/admin/authController');
 const portal = require('../controllers/admin/portalController');
 const appointments = require('../controllers/admin/appointmentController');
 const queue = require('../controllers/admin/queueController');
+const tools = require('../controllers/admin/toolsController');
+const cap = require('../controllers/admin/capController');
 const { requireAdmin, requirePermission, protectMutations } = require('../middleware/adminAuth');
 
 const router = express.Router();
@@ -28,6 +30,8 @@ router.get('/students/:id', requirePermission('students:view'), portal.studentDe
 router.post('/students/:id/review', requirePermission('applications:review'), portal.reviewApplication);
 router.post('/students/:id/notes', requirePermission('applications:review'), portal.addNote);
 router.put('/students/:id/verification', requirePermission('verification:record'), portal.recordVerification);
+router.post('/students/:id/tasks/:taskKey/review', requirePermission('applications:review'), portal.reviewTask);
+router.get('/students/:id/tasks/:taskKey/uploads/:fileId', requirePermission('applications:review'), portal.downloadTaskFile);
 
 router.get('/appointments', requirePermission('students:view'), appointments.list);
 router.post('/appointments', requirePermission('appointments:manage'), appointments.schedule);
@@ -46,6 +50,28 @@ router.post('/queue/tokens/:id/start', requirePermission('queue:operate'), queue
 router.post('/queue/tokens/:id/complete', requirePermission('queue:operate'), queue.complete);
 router.post('/queue/tokens/:id/no-show', requirePermission('queue:operate'), queue.noShow);
 router.post('/queue/tokens/:id/cancel', requirePermission('queue:operate'), queue.cancel);
+
+// CAP allotment verification (trusted records, claims, corrections, audit)
+router.get('/cap/records', requirePermission('cap:view'), cap.list);
+router.post('/cap/records/import', requirePermission('cap:manage'), cap.importCsv);
+router.post('/cap/records', requirePermission('cap:manage'), cap.create);
+router.get('/cap/records/:id', requirePermission('cap:view'), cap.getOne);
+router.put('/cap/records/:id', requirePermission('cap:manage'), cap.update);
+router.post('/cap/records/:id/verify', requirePermission('cap:verify'), cap.verify);
+router.post('/cap/records/:id/revoke', requirePermission('cap:verify'), cap.revoke);
+router.post('/cap/records/:id/unlink', requirePermission('cap:manage'), cap.unlink);
+router.get('/cap/claims', requirePermission('cap:view'), cap.listClaims);
+router.post('/cap/claims/:id/approve', requirePermission('cap:manage'), cap.approveClaim);
+router.post('/cap/claims/:id/reject', requirePermission('cap:manage'), cap.rejectClaim);
+
+// Phase 5: searching, sorting, matrices and undo (stack)
+router.get('/search', requirePermission('students:view'), tools.search);
+router.get('/planner/unscheduled', requirePermission('students:view'), tools.unscheduled);
+router.get('/planner/arrivals', requirePermission('students:view'), tools.arrivals);
+router.get('/planner/load', requirePermission('students:view'), tools.load);
+router.get('/planner/documents', requirePermission('students:view'), tools.documents);
+router.get('/undo', requirePermission('applications:review'), tools.undoList);
+router.post('/undo', requirePermission('applications:review'), tools.undo);
 
 router.get('/activity', requirePermission('activity:view'), portal.activity);
 

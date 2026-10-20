@@ -1,76 +1,66 @@
-/* CAP details form. */
+/* CAP details page: Read-only display of the student's CAP allotment details. */
 (async function () {
-  const form = document.getElementById('cap-form');
-  const button = document.getElementById('cap-btn');
-  const FIELDS = ['applicationId', 'studentName', 'allottedCollege', 'courseBranch', 'capRound', 'allotmentStatus'];
-  const LABELS = {
-    applicationId: 'Application ID is required.',
-    studentName: 'Student name is required.',
-    allottedCollege: 'Allotted college is required.',
-    courseBranch: 'Course / branch is required.',
-    capRound: 'CAP round is required.',
-    allotmentStatus: 'Allotment status is required.',
-  };
-
+  const esc = UI.esc;
+  const root = document.getElementById('cap-content');
   const student = await Auth.requireLogin('cap-details.html');
   if (!student) return;
 
-  function fillSelect(select, values) {
-    values.forEach((v) => {
-      const opt = document.createElement('option');
-      opt.value = v;
-      opt.textContent = v;
-      select.appendChild(opt);
-    });
+  function render(data) {
+    const c = data && data.capDetails;
+    const ver = data && data.verification;
+
+    if (!c) {
+      root.innerHTML = `
+        <div class="alert alert-info" role="status">
+          <strong>No record found.</strong> There are no CAP allotment details linked to your account. Please contact the college admission cell.
+        </div>`;
+      return;
+    }
+
+    const isVerified = Boolean(c.verified || (ver && ver.status === 'verified'));
+    const isRevoked = Boolean(c.status === 'revoked' || (ver && ver.status === 'revoked'));
+    const isPending = !isVerified && !isRevoked;
+
+    const statusBadge = isVerified
+      ? '<span class="status-pill completed">Verified</span>'
+      : (isRevoked
+        ? '<span class="status-pill rejected">Revoked</span>'
+        : '<span class="status-pill in_progress">Verification Pending</span>');
+
+    const statusNotice = isVerified
+      ? `<div class="alert alert-success py-2 small mb-0" role="status">
+           Verified by the college admission cell${ver && ver.verifiedAt ? ` on ${esc(UI.formatDate(ver.verifiedAt))}` : ''}. These details are read-only.
+         </div>`
+      : (isRevoked
+        ? `<div class="alert alert-danger py-2 small mb-0" role="alert">
+             This allotment record has been revoked by the college admission cell. Please contact the admission office.
+           </div>`
+        : `<div class="alert alert-warning py-2 small mb-0" role="status">
+             <strong>Verification Pending:</strong> The college admission cell has not verified this allotment record yet. Your allotment details are read-only.
+           </div>`);
+
+    root.innerHTML = `
+      <section class="panel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h2 class="panel-title mb-0">Your CAP Allotment</h2>
+          ${statusBadge}
+        </div>
+        <dl class="cap-summary mb-3">
+          <dt>Application ID</dt><dd class="fw-semibold">${esc(c.applicationId)}</dd>
+          <dt>Candidate Name</dt><dd>${esc(c.studentName)}</dd>
+          <dt>Allotted College</dt><dd>${esc(c.allottedCollege)}</dd>
+          <dt>Course / Branch</dt><dd>${esc(c.courseBranch)}</dd>
+          <dt>CAP Round</dt><dd>${esc(c.capRound)}</dd>
+          <dt>Allotment Status</dt><dd>${esc(c.allotmentStatus)}</dd>
+        </dl>
+        ${statusNotice}
+      </section>`;
   }
 
   try {
     const res = await Api.get('/api/cap-details');
-    const { capDetails, options } = res.data;
-    fillSelect(form.elements.capRound, options.capRounds);
-    fillSelect(form.elements.allotmentStatus, options.allotmentStatuses);
-
-    if (capDetails) {
-      FIELDS.forEach((name) => { form.elements[name].value = capDetails[name]; });
-      document.getElementById('cap-updated').textContent = `Last saved ${UI.formatDate(capDetails.updatedAt)}.`;
-    } else {
-      form.elements.studentName.value = student.fullName; // sensible default, editable
-    }
+    render(res.data);
   } catch (err) {
     UI.showAlert('danger', err.message);
-    button.disabled = true;
-    return;
   }
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    UI.clearAlert();
-    UI.clearFieldErrors(form);
-
-    const data = {};
-    FIELDS.forEach((name) => { data[name] = form.elements[name].value.trim(); });
-
-    const errors = {};
-    FIELDS.forEach((name) => { if (!data[name]) errors[name] = LABELS[name]; });
-    if (data.applicationId && !/^[A-Za-z0-9][A-Za-z0-9-]{4,19}$/.test(data.applicationId)) {
-      errors.applicationId = 'Application ID must be 5-20 characters (letters, numbers, hyphen).';
-    }
-    if (Object.keys(errors).length) {
-      UI.setFieldErrors(form, errors);
-      UI.showAlert('danger', 'Please correct the highlighted fields.');
-      return;
-    }
-
-    UI.setLoading(button, true, 'Saving');
-    try {
-      const res = await Api.put('/api/cap-details', data);
-      UI.showAlert('success', `${res.message} Taking you to your dashboard.`);
-      setTimeout(() => { window.location.href = 'dashboard.html'; }, 1200);
-    } catch (err) {
-      if (err.status === 401) { window.location.replace('login.html?next=cap-details.html'); return; }
-      UI.setFieldErrors(form, err.errors);
-      UI.showAlert('danger', err.message);
-      UI.setLoading(button, false);
-    }
-  });
 })();

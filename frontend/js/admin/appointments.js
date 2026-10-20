@@ -59,7 +59,7 @@
     }
   }
 
-  const done = (message) => () => { UI.showAlert('success', message); load(); };
+  const done = (message) => () => { UI.showAlert('success', message); load(); Admin.refreshUndo(); };
 
   $('tabs').addEventListener('click', (e) => {
     const b = e.target.closest('[data-status]');

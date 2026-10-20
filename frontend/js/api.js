@@ -38,11 +38,25 @@
     return payload;
   }
 
+  async function upload(url, formData) {
+    const options = { method: 'POST', credentials: 'same-origin', body: formData };
+    let res;
+    try { res = await fetch(url, options); } catch (_) { throw new ApiError('Cannot reach the server. Check that it is running and try again.', 0); }
+    let payload = null;
+    try { payload = await res.json(); } catch (_) { /* non-JSON response */ }
+    if (!res.ok || !payload || payload.success === false) {
+      throw new ApiError((payload && payload.message) || 'Something went wrong. Please try again.', res.status, payload && payload.errors, payload && payload.code);
+    }
+    return payload;
+  }
+
   window.Api = {
     ApiError,
     get: (url) => request('GET', url),
     post: (url, body) => request('POST', url, body === undefined ? {} : body),
     put: (url, body) => request('PUT', url, body),
     patch: (url, body) => request('PATCH', url, body),
+    del: (url) => request('DELETE', url),
+    upload,
   };
 })();

@@ -6,7 +6,7 @@
   const admin = await Admin.requireAdmin('activity.html', 'activity:view');
   if (!admin) { loading.classList.add('d-none'); return; }
 
-  const GROUP_LABELS = { auth: 'Log in / out', application: 'Applications', appointment: 'Appointments', verification: 'Verification', queue: 'Queue and tokens' };
+  const GROUP_LABELS = { auth: 'Log in / out', application: 'Applications', appointment: 'Appointments', verification: 'Verification', queue: 'Queue and tokens', cap: 'CAP records' };
   const state = { page: 1, adminId: '', group: '', search: '' };
   let built = false;
   let requestNo = 0;

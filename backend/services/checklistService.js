@@ -3,6 +3,7 @@ const db = require('../config/db');
 const documentService = require('./documentService');
 const verificationService = require('./verificationService');
 const feeService = require('./feeService');
+const workflow = require('./taskWorkflowService');
 
 const STATUSES = ['pending', 'in_progress', 'completed'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -89,7 +90,8 @@ function saveRecord(studentId, key, { eventDate, note }) {
   ).run(studentId, key, eventDate, note);
 }
 
-function toItem(def, status, summary, updatedAt) {
+function toItem(def, reportedStatus, summary, updatedAt, review) {
+  const status = review.status;
   return {
     key: def.key,
     title: def.title,
@@ -97,12 +99,18 @@ function toItem(def, status, summary, updatedAt) {
     guidance: def.guidance,
     required: true,
     status,
-    statusLabel: def.labels[status],
+    statusLabel: workflow.LABELS[status],
+    reportedStatus,
+    reportedStatusLabel: def.labels[reportedStatus] || def.labels.pending,
     statusOptions: STATUSES.map((s) => ({ value: s, label: def.labels[s] })),
+    workflowOptions: workflow.STATUSES.map((s) => ({ value: s, label: workflow.LABELS[s] })),
     statusSource: def.statusSource,
-    editable: def.statusSource !== 'college',
+    editable: def.statusSource !== 'college' && status !== 'approved',
+    correctionReason: review.correctionReason,
+    reviewedBy: review.reviewedBy,
+    reviewedAt: review.reviewedAt,
     summary: summary || null,
-    updatedAt: updatedAt || null,
+    updatedAt: review.updatedAt || updatedAt || null,
   };
 }
 
@@ -124,22 +132,22 @@ function getChecklist(studentId) {
       case 'allotment_acceptance': {
         const status = storedStatus(def.key);
         const rec = getRecord(studentId, def.key);
-        const summary = status === 'completed' && rec.eventDate ? `Accepted on ${fmtDate(rec.eventDate)}` : null;
-        return toItem(def, status, summary, storedTime(def.key));
+        const summary = rec.eventDate ? `Accepted on ${fmtDate(rec.eventDate)}` : null;
+        return toItem(def, status, summary, storedTime(def.key), workflow.get(studentId, def.key));
       }
       case 'admission_form': {
         const status = storedStatus(def.key);
         const rec = getRecord(studentId, def.key);
-        const summary = status === 'completed' && rec.eventDate ? `Submitted on ${fmtDate(rec.eventDate)}` : null;
-        return toItem(def, status, summary, storedTime(def.key));
+        const summary = rec.eventDate ? `Submitted on ${fmtDate(rec.eventDate)}` : null;
+        return toItem(def, status, summary, storedTime(def.key), workflow.get(studentId, def.key));
       }
       case 'document_preparation':
-        return toItem(def, docs.status, `${docs.preparedRequired} of ${docs.requiredTotal} required documents prepared`, docs.updatedAt);
+        return toItem(def, docs.status, `${docs.preparedRequired} of ${docs.requiredTotal} required documents prepared`, docs.updatedAt, workflow.get(studentId, def.key));
       case 'physical_verification': {
         const summary = verification.status === 'completed'
-          ? `Verified${verification.verifiedAt ? ` on ${fmtDate(verification.verifiedAt)}` : ''} by the college`
-          : 'Waiting for in-person verification at the college';
-        return toItem(def, verification.status, summary, verification.updatedAt);
+          ? `Originals verified${verification.verifiedAt ? ` on ${fmtDate(verification.verifiedAt)}` : ''} by the college`
+          : 'Original documents must still be checked in person at the college';
+        return toItem(def, verification.status, summary, verification.updatedAt, workflow.get(studentId, def.key));
       }
       case 'fee_payment': {
         let summary = null;
@@ -148,10 +156,10 @@ function getChecklist(studentId) {
         } else if (fee.totalFee) {
           summary = `Total fee ${rupees(fee.totalFee)}`;
         }
-        return toItem(def, storedStatus(def.key), summary, storedTime(def.key));
+        return toItem(def, storedStatus(def.key), summary, storedTime(def.key), workflow.get(studentId, def.key));
       }
       default:
-        return toItem(def, storedStatus(def.key), null, storedTime(def.key));
+        return toItem(def, storedStatus(def.key), null, storedTime(def.key), workflow.get(studentId, def.key));
     }
   });
 }

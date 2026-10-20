@@ -98,10 +98,17 @@
 
   function panelCap(d) {
     const c = d.cap;
+    const v = d.capVerification || {};
+    let verification = '';
+    if (c && v.record) {
+      verification = `<p class="small text-muted mt-3 mb-0"><span class="status-pill completed">Verified</span> by ${esc(v.record.verifiedBy || 'an admin')}${v.record.verifiedAt ? ` on ${esc(UI.formatDate(v.record.verifiedAt))}` : ''}. ${esc(v.record.sourceLabel)}${v.record.sourceNote ? ` (${esc(v.record.sourceNote)})` : ''}, entered by ${esc(v.record.enteredBy)}. Corrections are made on the <a href="cap-records.html?tab=verified">CAP records</a> page.</p>`;
+    }
+    const waiting = !c && v.pendingClaim
+      ? `<p class="mb-1"><span class="status-pill in_progress">Verification pending</span></p><p class="mb-0">The student submitted application ID <strong>${esc(v.pendingClaim.applicationId)}</strong>. ${esc(v.pendingClaim.reasonLabel)}. Resolve it on the <a href="cap-records.html?tab=claims">CAP records</a> page.</p>`
+      : '<p class="text-muted mb-0">The student has not submitted a CAP application ID yet, or it is not linked to a verified record.</p>';
     return `<section class="panel mb-4" aria-label="CAP details">
       <h2 class="panel-title mb-2">CAP application</h2>
-      ${c ? `<dl class="detail-grid mb-0">${dd('Application ID', c.applicationId)}${dd('Name on allotment letter', c.studentName)}${dd('Allotted college', c.allottedCollege)}${dd('Course / branch', c.courseBranch)}${dd('CAP round', c.capRound)}${dd('Allotment status', c.allotmentStatus)}${dd('Last updated', UI.formatDate(c.updatedAt))}</dl>`
-    : '<p class="text-muted mb-0">The student has not entered CAP details yet.</p>'}
+      ${c ? `<dl class="detail-grid mb-0">${dd('Application ID', c.applicationId)}${dd('Name on the CAP list', c.studentName)}${dd('Allotted college', c.allottedCollege)}${dd('Course / branch', c.courseBranch)}${dd('CAP round', c.capRound)}${dd('Allotment status', c.allotmentStatus)}${dd('Last updated', UI.formatDate(c.updatedAt))}</dl>${verification}` : waiting}
     </section>`;
   }
 
@@ -112,7 +119,7 @@
     return `<section class="panel mb-4" aria-label="Admission progress">
       <div class="d-flex justify-content-between align-items-baseline mb-2"><h2 class="panel-title mb-0">Admission progress</h2><span class="fw-bold">${d.progress.completed} of ${d.progress.total} tasks complete</span></div>
       ${UI.segmentedBar(d.tasks.map((t) => t.status))}
-      <ul class="review-history mt-2">${d.tasks.map((t) => `<li class="d-flex flex-wrap justify-content-between gap-2"><span><span class="fw-semibold">${esc(t.title)}</span>${t.summary ? `<span class="d-block text-muted">${esc(t.summary)}</span>` : ''}</span>${UI.statusPill(t.status, t.statusLabel)}</li>`).join('')}</ul>
+      <ul class="review-history mt-2">${d.tasks.map((t) => `<li class="d-flex flex-wrap justify-content-between gap-2"><span><span class="fw-semibold">${esc(t.title)}</span>${t.summary ? `<span class="d-block text-muted">${esc(t.summary)}</span>` : ''}${t.correctionReason ? `<span class="d-block text-warning small">Correction: ${esc(t.correctionReason)}</span>` : ''}${t.files.length ? `<span class="d-block small">${t.files.map((f) => `<a href="/api/admin/students/${d.student.id}/tasks/${encodeURIComponent(t.key)}/uploads/${f.id}">${esc(f.originalName)}</a>`).join(', ')}</span>` : ''}</span><span>${UI.statusPill(t.status, t.statusLabel)}${canReview && ['submitted', 'pending_review'].includes(t.status) ? `<button class="btn btn-sm btn-outline-primary ms-2" data-act="task-review" data-task="${esc(t.key)}">Review</button>` : ''}</span></li>`).join('')}</ul>
       ${(rec.allotmentAcceptance.note || rec.admissionForm.note) ? `<div class="small mt-2">${rec.allotmentAcceptance.note ? `<div><strong>Acceptance note:</strong> ${esc(rec.allotmentAcceptance.note)}</div>` : ''}${rec.admissionForm.note ? `<div><strong>Admission form note:</strong> ${esc(rec.admissionForm.note)}</div>` : ''}</div>` : ''}
     </section>
     <section class="panel mb-4" aria-label="Documents">
@@ -148,6 +155,7 @@
     return (res) => {
       // appointment endpoints wrap the refreshed detail as data.student; the others return it as data
       render(res.data.review ? res.data : res.data.student);
+      Admin.refreshUndo();
       UI.showAlert('success', message);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -212,6 +220,27 @@
     Modal.focusFirst(m);
   }
 
+  function openTaskReview(key) {
+    const task = data.tasks.find((t) => t.key === key);
+    if (!task) return;
+    const m = Modal.open({ title: `Review: ${task.title}` });
+    m.body.innerHTML = `<form id="task-review-form" novalidate><p>Current status: ${UI.statusPill(task.status, task.statusLabel)}</p>
+      <fieldset class="mb-3"><legend class="doc-legend">Decision</legend><label class="review-choice"><input type="radio" name="action" value="approve" checked><span><span class="t">Approve</span><span class="d">Mark this task approved.</span></span></label><label class="review-choice"><input type="radio" name="action" value="request_corrections"><span><span class="t">Request corrections</span><span class="d">Return the task to the student with a required reason.</span></span></label></fieldset>
+      <div><label class="form-label fw-semibold" for="task-remarks">Correction reason</label><textarea class="form-control" id="task-remarks" name="remarks" rows="3" maxlength="1000"></textarea><div class="invalid-feedback"></div></div></form>`;
+    m.footer.innerHTML = '<button type="button" class="btn btn-outline-secondary" data-act="cancel">Cancel</button><button type="submit" class="btn btn-primary" form="task-review-form">Save decision</button>';
+    m.footer.querySelector('[data-act=cancel]').addEventListener('click', () => m.close());
+    const form = m.body.querySelector('form');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault(); UI.clearFieldErrors(form); m.alertArea.innerHTML = '';
+      const button = m.footer.querySelector('[type=submit]'); UI.setLoading(button, true, 'Saving'); m.setBusy(true);
+      try {
+        const res = await Api.post(`/api/admin/students/${data.student.id}/tasks/${encodeURIComponent(key)}/review`, { action: form.elements.action.value, remarks: form.elements.remarks.value });
+        m.setBusy(false); m.close(); done(res.message)(res);
+      } catch (err) { m.setBusy(false); UI.setLoading(button, false); UI.setFieldErrors(form, err.errors); UI.showAlertIn(m.alertArea, 'danger', err.message); }
+    });
+    Modal.focusFirst(m);
+  }
+
   function simpleDialog({ title, bodyHtml, submitLabel, formId, request, successMessage }) {
     const m = Modal.open({ title });
     m.body.innerHTML = `<form id="${formId}" novalidate>${bodyHtml}</form>`;
@@ -269,6 +298,7 @@
     const name = data.student.fullName;
     switch (b.dataset.act) {
       case 'review': openReview(); break;
+      case 'task-review': openTaskReview(b.dataset.task); break;
       case 'note': openNote(); break;
       case 'verify': openVerify(); break;
       case 'check-in': {

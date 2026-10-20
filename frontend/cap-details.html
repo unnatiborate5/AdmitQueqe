@@ -13,57 +13,12 @@
 <body>
   <div id="app-navbar"></div>
   <main class="container py-4" style="max-width: 46rem;">
-    <h1 class="page-title mb-1">CAP details</h1>
-    <p class="text-muted mb-4">Copy these from your CAP allotment letter. You can edit them later if something changes.</p>
+    <h1 class="page-title mb-1">CAP Details</h1>
+    <p class="text-muted mb-4">Your official CAP allotment details as recorded by the college admission cell.</p>
     <div id="alert-area"></div>
-
-    <form id="cap-form" class="panel" novalidate>
-      <div class="row">
-        <div class="col-md-6 mb-3">
-          <label for="applicationId" class="form-label fw-semibold">Application ID</label>
-          <input type="text" class="form-control" id="applicationId" name="applicationId" maxlength="20" autocomplete="off" required>
-          <div class="invalid-feedback"></div>
-          <div class="form-text">5-20 letters, numbers or hyphens.</div>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label for="studentName" class="form-label fw-semibold">Student name</label>
-          <input type="text" class="form-control" id="studentName" name="studentName" maxlength="100" required>
-          <div class="invalid-feedback"></div>
-          <div class="form-text">As printed on the allotment letter.</div>
-        </div>
-      </div>
-      <div class="mb-3">
-        <label for="allottedCollege" class="form-label fw-semibold">Allotted college</label>
-        <input type="text" class="form-control" id="allottedCollege" name="allottedCollege" maxlength="150" required>
-        <div class="invalid-feedback"></div>
-      </div>
-      <div class="mb-3">
-        <label for="courseBranch" class="form-label fw-semibold">Course / branch</label>
-        <input type="text" class="form-control" id="courseBranch" name="courseBranch" maxlength="100" required>
-        <div class="invalid-feedback"></div>
-      </div>
-      <div class="row">
-        <div class="col-md-6 mb-3">
-          <label for="capRound" class="form-label fw-semibold">CAP round</label>
-          <select class="form-select" id="capRound" name="capRound" required>
-            <option value="">Select round</option>
-          </select>
-          <div class="invalid-feedback"></div>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label for="allotmentStatus" class="form-label fw-semibold">Allotment status</label>
-          <select class="form-select" id="allotmentStatus" name="allotmentStatus" required>
-            <option value="">Select status</option>
-          </select>
-          <div class="invalid-feedback"></div>
-        </div>
-      </div>
-      <div class="d-flex flex-wrap gap-2 mt-2">
-        <button type="submit" class="btn btn-primary" id="cap-btn">Save CAP details</button>
-        <a class="btn btn-outline-secondary" href="dashboard.html">Back to dashboard</a>
-      </div>
-      <p class="text-muted small mt-3 mb-0" id="cap-updated"></p>
-    </form>
+    <div id="cap-content"><div class="spinner-wrap" role="status"><div class="spinner-border text-primary mb-2" aria-hidden="true"></div><div>Loading</div></div></div>
+    <p class="manual-note small mt-4 mb-0">AdmitFlow is an internal college admission portal. Allotment records are maintained by the college admission cell.</p>
+    <a class="btn btn-outline-secondary mt-3" href="dashboard.html">Back to dashboard</a>
   </main>
 
   <script src="js/api.js"></script>

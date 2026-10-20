@@ -9,6 +9,37 @@
   const input = (id, name, type, value, attrs) => ({ id, html: `<input class="form-control" id="${id}" name="${name}" type="${type}" value="${esc(value || '')}" ${attrs || ''}>` });
   const textarea = (id, name, value, attrs) => ({ id, html: `<textarea class="form-control" id="${id}" name="${name}" rows="2" ${attrs || ''}>${esc(value || '')}</textarea>` });
 
+  /** Shows how busy the chosen day/slot is (sparse-matrix report from the engine) and offers the least busy time. */
+  function attachLoadHint(m) {
+    const date = m.body.querySelector('#ap-date');
+    const timeInput = m.body.querySelector('#ap-time');
+    const hint = m.body.querySelector('#ap-load');
+    if (!date || !timeInput || !hint) return;
+    let report = null; let forDate = '';
+    const render = () => {
+      if (!report) { hint.innerHTML = ''; return; }
+      const sug = report.suggestions[0];
+      const t = timeInput.value;
+      const slot = t ? `${t.slice(0, 2)}:${Number(t.slice(3, 5)) < 30 ? '00' : '30'}` : null;
+      const here = slot ? (report.cells.find((c) => c.time === slot) || { count: 0 }).count : null;
+      hint.innerHTML = `${here === null ? '' : (here > 0 ? `<span class="text-warning fw-bold">${here} student${here === 1 ? '' : 's'} already booked in the ${esc(slot)} slot.</span> ` : `<span class="text-success">Nobody else is booked in the ${esc(slot)} slot.</span> `)}`
+        + `Least busy time that day: <strong>${esc(sug.time)}</strong> (${sug.count} booked). <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="ap-suggest">Use ${esc(sug.time)}</button>`;
+      const b = hint.querySelector('#ap-suggest');
+      if (b) b.addEventListener('click', () => { timeInput.value = sug.time; render(); });
+    };
+    const refresh = async () => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value)) { report = null; render(); return; }
+      if (date.value !== forDate) {
+        forDate = date.value;
+        try { report = (await Api.get(`/api/admin/planner/load?from=${date.value}&days=1`)).data; } catch (err) { report = null; }
+      }
+      render();
+    };
+    date.addEventListener('change', refresh);
+    timeInput.addEventListener('input', render);
+    refresh();
+  }
+
   function footer(m, saveLabel) {
     m.footer.innerHTML = `<button type="button" class="btn btn-outline-secondary" data-act="cancel">Cancel</button>
       <button type="submit" class="btn btn-primary" form="appt-form">${esc(saveLabel)}</button>`;
@@ -46,6 +77,7 @@
         <div class="col-sm-6">${field('Date', input('ap-date', 'date', 'date', a && a.date, `min="${todayLocal()}" required`))}</div>
         <div class="col-sm-6">${field('Time', input('ap-time', 'time', 'time', a && a.time, 'required'))}</div>
       </div>
+      <div class="slot-hint mb-3" id="ap-load" aria-live="polite"></div>
       ${field('Venue', input('ap-venue', 'venue', 'text', a && a.venue, 'maxlength="150" required placeholder="e.g. Admission Cell, Main Building, Room 12"'))}
       ${field('Instructions for the student (optional)', textarea('ap-instr', 'instructions', a && a.instructions, 'maxlength="300" placeholder="e.g. Bring all originals and two photocopies of each document."'))}`;
   }
@@ -95,6 +127,7 @@
     </form>`;
     footer(m, 'Schedule');
     if (!student) picker(m);
+    attachLoadHint(m);
     wire(m, (v) => Api.post('/api/admin/appointments', { ...v, studentId: Number(v.studentId) || null }), onDone);
     Modal.focusFirst(m);
   }
@@ -107,6 +140,7 @@
       ${field('Reason for rescheduling', textarea('ap-reason', 'reason', '', 'maxlength="300" required'), 'The student will see this reason.')}
     </form>`;
     footer(m, 'Reschedule');
+    attachLoadHint(m);
     wire(m, (v) => Api.put(`/api/admin/appointments/${appointment.id}`, v), onDone);
     Modal.focusFirst(m);
   }

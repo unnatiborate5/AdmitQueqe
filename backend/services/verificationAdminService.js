@@ -10,6 +10,7 @@ const time = require('../utils/time');
 const activityService = require('./activityService');
 const applicationService = require('./applicationService');
 const verificationService = require('./verificationService');
+const taskWorkflowService = require('./taskWorkflowService');
 
 const LABELS = { pending: 'Not Verified', in_progress: 'Verification In Progress', completed: 'Verified at College' };
 
@@ -52,6 +53,10 @@ function record(admin, studentId, { status, remarks }) {
           summary: `Appointment ${appt.appointment_date} ${appt.appointment_time} of ${student.fullName} closed as completed (verification recorded)`,
           details: { appointmentId: appt.id, automatic: true },
         });
+      }
+      // A completed in-person check can approve Task 5, but only after the student has requested review.
+      if (taskWorkflowService.get(studentId, 'physical_verification').status === 'pending_review') {
+        taskWorkflowService.officerReview(admin, studentId, 'physical_verification', { action: 'approve' });
       }
     }
     return verificationService.get(studentId);

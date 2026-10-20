@@ -52,16 +52,19 @@ function build(name, sources) {
   return out;
 }
 
-const src = (...names) => names.map((n) => path.join(ENGINE_DIR, 'src', n));
-const ensureEngineBinary = () => build('queue_engine', src('queue_engine.cpp', 'protocol.cpp', 'main.cpp'));
-const ensureTestBinary = () => build('test_engine', [...src('queue_engine.cpp', 'protocol.cpp'), path.join(ENGINE_DIR, 'tests', 'test_engine.cpp')]);
+// Every .cpp in src/ except main.cpp is part of the engine library (queue engine, search index, planner, reports, protocols).
+const LIB_SOURCES = fs.readdirSync(path.join(ENGINE_DIR, 'src')).filter((f) => f.endsWith('.cpp') && f !== 'main.cpp').sort().map((f) => path.join(ENGINE_DIR, 'src', f));
+const ensureEngineBinary = () => build('queue_engine', [...LIB_SOURCES, path.join(ENGINE_DIR, 'src', 'main.cpp')]);
+/** Unit-test binaries: tests/<name>.cpp compiled with the library. Names: test_engine (queue), test_toolkit (Phase 5). */
+const ensureTestBinary = (name = 'test_engine') => build(name, [...LIB_SOURCES, path.join(ENGINE_DIR, 'tests', `${name}.cpp`)]);
+const TEST_NAMES = fs.readdirSync(path.join(ENGINE_DIR, 'tests')).filter((f) => /^test_.*\.cpp$/.test(f)).map((f) => f.replace(/\.cpp$/, '')).sort();
 
-module.exports = { ensureEngineBinary, ensureTestBinary, ENGINE_DIR, BUILD_DIR };
+module.exports = { ensureEngineBinary, ensureTestBinary, TEST_NAMES, ENGINE_DIR, BUILD_DIR };
 
 if (require.main === module) {
   try {
-    const out = process.argv.includes('--tests') ? ensureTestBinary() : ensureEngineBinary();
-    console.log(`C++ engine ready: ${path.relative(process.cwd(), out)}`);
+    if (process.argv.includes('--tests')) TEST_NAMES.forEach((n) => console.log(`C++ test binary ready: ${path.relative(process.cwd(), ensureTestBinary(n))}`));
+    else console.log(`C++ engine ready: ${path.relative(process.cwd(), ensureEngineBinary())}`);
   } catch (err) {
     console.error(err.message);
     process.exit(1);

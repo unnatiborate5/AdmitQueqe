@@ -5,10 +5,12 @@
     ['dashboard.html', 'Dashboard', 'dashboard:view'],
     ['students.html', 'Students', 'students:view'],
     ['appointments.html', 'Appointments', 'students:view'],
+    ['cap-records.html', 'CAP records', 'cap:view'],
     ['queue.html', 'Queue', 'queue:view'],
+    ['planner.html', 'Planner', 'students:view'],
     ['activity.html', 'Activity', 'activity:view'],
   ];
-  const SAFE_NEXT = ['dashboard.html', 'students.html', 'student.html', 'appointments.html', 'queue.html', 'activity.html'];
+  const SAFE_NEXT = ['dashboard.html', 'students.html', 'student.html', 'appointments.html', 'queue.html', 'planner.html', 'cap-records.html', 'activity.html'];
 
   const REVIEW_LABELS = { pending: 'Pending Review', approved: 'Approved', rejected: 'Rejected', correction_requested: 'Corrections Requested', not_started: 'Not Started' };
   const VERIF_LABELS = { pending: 'Not Verified', in_progress: 'In Progress', completed: 'Verified' };
@@ -42,7 +44,11 @@
         <div class="container d-flex flex-wrap align-items-center gap-2 gap-md-3">
           <a class="brand" href="dashboard.html">Admit<span class="brand-mark">Flow</span><span class="admin-badge">Admin</span></a>
           <ul class="nav flex-wrap me-md-auto">${links}</ul>
+          ${can(admin, 'students:view') ? `<form class="admin-search" id="admin-search" role="search" autocomplete="off" aria-label="Search students, application IDs and tokens">
+            <input type="search" class="form-control form-control-sm" id="admin-search-input" placeholder="Search name, application ID or token" maxlength="60" aria-controls="admin-search-results">
+            <div class="search-dropdown d-none" id="admin-search-results" role="region" aria-live="polite"></div></form>` : ''}
           <div class="d-flex align-items-center gap-2 ms-auto">
+            ${can(admin, 'applications:review') ? '<button type="button" class="btn btn-outline-secondary btn-sm d-none" id="undo-btn" title="Undo your most recent change">Undo</button>' : ''}
             <span class="small fw-semibold" id="nav-user">${esc(admin.fullName)}</span>
             <span class="role-chip">${esc(admin.roleLabel)}</span>
             <button type="button" class="btn btn-outline-primary btn-sm" id="logout-btn">Log out</button>
@@ -50,6 +56,95 @@
         </div>
       </header>`;
     document.getElementById('logout-btn').addEventListener('click', logout);
+    if (document.getElementById('admin-search')) initSearch();
+    if (document.getElementById('undo-btn')) initUndo();
+  }
+
+  // ---------------- global search (binary search on application IDs / tokens, linear search on names, in the C++ engine) ----------------
+  function initSearch() {
+    const input = document.getElementById('admin-search-input');
+    const box = document.getElementById('admin-search-results');
+    const form = document.getElementById('admin-search');
+    let n = 0;
+    const hide = () => box.classList.add('d-none');
+    const algoText = (list) => list.map((a) => `${a.field}: ${a.algorithm}, ${a.comparisons} ${a.algorithm === 'linear search' ? 'records checked' : 'steps'} of ${a.searched}`).join(' | ');
+
+    const run = debounce(async () => {
+      const q = input.value.trim();
+      if (q.length < 2) { hide(); return; }
+      const mine = ++n;
+      try {
+        const d = (await Api.get(`/api/admin/search${qs({ q })}`)).data;
+        if (mine !== n) return;
+        box.innerHTML = (d.results.length ? d.results.map((r) => `<a class="search-hit-row" href="student.html?id=${r.id}">
+            <div class="d-flex justify-content-between gap-2"><span class="fw-semibold">${esc(r.name)}</span>${reviewPill(r.reviewStatus)}</div>
+            <div class="small text-muted">${esc(r.applicationId || 'No application yet')}${r.token ? ` &middot; token <strong>${esc(r.token)}</strong>` : ''} &middot; matched by ${esc(r.matchedBy.join(', ').toLowerCase())}</div></a>`).join('')
+          : '<div class="p-3 text-muted small">No student, application ID or token matches.</div>')
+          + (d.truncated ? `<div class="search-meta">Showing the first ${d.results.length} of ${d.total}. Type more to narrow it down.</div>` : '')
+          + `<div class="search-meta">${esc(algoText(d.algorithms))}</div>`;
+        box.classList.remove('d-none');
+      } catch (err) {
+        if (err.status === 401) { window.location.replace('login.html?expired=1'); return; }
+        box.innerHTML = `<div class="p-3 small text-danger">${esc(err.message)}</div>`;
+        box.classList.remove('d-none');
+      }
+    }, 250);
+
+    input.addEventListener('input', run);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hide(); input.blur(); } if (e.key === 'ArrowDown') { const a = box.querySelector('a'); if (a) { e.preventDefault(); a.focus(); } } });
+    box.addEventListener('keydown', (e) => {
+      const links = [...box.querySelectorAll('a')]; const i = links.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' && i < links.length - 1) { e.preventDefault(); links[i + 1].focus(); }
+      if (e.key === 'ArrowUp') { e.preventDefault(); (i > 0 ? links[i - 1] : input).focus(); }
+      if (e.key === 'Escape') { hide(); input.focus(); }
+    });
+    form.addEventListener('submit', (e) => { e.preventDefault(); const a = box.querySelector('a'); if (a) window.location.href = a.getAttribute('href'); });
+    document.addEventListener('click', (e) => { if (!form.contains(e.target)) hide(); });
+    input.addEventListener('focus', () => { if (box.innerHTML && input.value.trim().length >= 2) box.classList.remove('d-none'); });
+  }
+
+  // ---------------- undo (stack of the admin's recent reversible actions, in the C++ engine) ----------------
+  let undoState = null;
+  async function refreshUndo() {
+    const btn = document.getElementById('undo-btn');
+    if (!btn) return;
+    try {
+      undoState = (await Api.get('/api/admin/undo')).data;
+      btn.classList.toggle('d-none', undoState.size === 0);
+      btn.textContent = `Undo (${undoState.size})`;
+      btn.title = undoState.next ? `Undo: ${undoState.next.summary}` : 'Nothing to undo';
+    } catch (err) { /* the undo button is optional; ignore */ }
+  }
+
+  function initUndo() {
+    const btn = document.getElementById('undo-btn');
+    btn.addEventListener('click', async () => {
+      await refreshUndo();
+      if (!undoState || !undoState.size) { UI.showAlert('info', 'There is nothing to undo.'); return; }
+      const m = Modal.open({ title: 'Undo recent changes' });
+      m.body.innerHTML = `<p class="small text-muted">Your most recent changes, newest first. Undo always reverses the newest one first. If the application or appointment was changed again afterwards, the undo is refused so newer work is never overwritten.</p>
+        <ol class="review-history ps-3">${undoState.items.map((i, k) => `<li${k === 0 ? ' class="fw-semibold"' : ''}>${esc(i.summary)}<div class="small text-muted fw-normal">${esc(i.studentName)} &middot; ${esc(UI.formatDate(i.createdAt))}</div></li>`).join('')}</ol>`;
+      m.footer.innerHTML = '<button type="button" class="btn btn-outline-secondary" data-x="cancel">Close</button><button type="button" class="btn btn-primary" data-x="undo">Undo the newest change</button>';
+      m.footer.querySelector('[data-x=cancel]').addEventListener('click', () => m.close());
+      m.footer.querySelector('[data-x=undo]').addEventListener('click', async () => {
+        const go = m.footer.querySelector('[data-x=undo]');
+        go.disabled = true;
+        try {
+          const res = await Api.post('/api/admin/undo', {});
+          m.close();
+          UI.showAlert('success', res.message);
+          await refreshUndo();
+          document.dispatchEvent(new CustomEvent('admin:undone'));
+          setTimeout(() => window.location.reload(), 900);
+        } catch (err) {
+          go.disabled = false;
+          UI.showAlertIn(m.alertArea, 'danger', err.message);
+          await refreshUndo();
+          if (err.status === 401) window.location.replace('login.html?expired=1');
+        }
+      });
+    });
+    refreshUndo();
   }
 
   /** Protects a page. Returns the admin, or null after redirecting to the login page. */
@@ -99,5 +194,5 @@
     return s ? `?${s}` : '';
   };
 
-  window.Admin = { SAFE_NEXT, REVIEW_LABELS, VERIF_LABELS, APPT_LABELS, can, reviewPill, verifPill, apptPill, tokenPill, slot, debounce, requireAdmin, handleError, renderPager, qs, logout };
+  window.Admin = { SAFE_NEXT, REVIEW_LABELS, VERIF_LABELS, APPT_LABELS, can, reviewPill, verifPill, apptPill, tokenPill, slot, debounce, requireAdmin, handleError, renderPager, qs, logout, refreshUndo };
 })();

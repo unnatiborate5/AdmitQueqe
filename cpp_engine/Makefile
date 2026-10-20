@@ -2,23 +2,26 @@
 # (backend/scripts/buildEngine.js), so you only need this if you want to build by hand.
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wpedantic -Iinclude
-SRC      := src/queue_engine.cpp src/protocol.cpp
+SRC      := $(filter-out src/main.cpp,$(wildcard src/*.cpp))
 BUILD    := build
 
 all: $(BUILD)/queue_engine
 
-$(BUILD)/queue_engine: $(SRC) src/main.cpp $(wildcard include/*.hpp include/dsa/*.hpp)
+HEADERS  := $(wildcard include/*.hpp include/dsa/*.hpp include/algo/*.hpp)
+
+$(BUILD)/queue_engine: $(SRC) src/main.cpp $(HEADERS)
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $(SRC) src/main.cpp -o $@
 
-$(BUILD)/test_engine: $(SRC) tests/test_engine.cpp $(wildcard include/*.hpp include/dsa/*.hpp)
+$(BUILD)/test_%: $(SRC) tests/test_%.cpp $(HEADERS)
 	@mkdir -p $(BUILD)
-	$(CXX) $(CXXFLAGS) $(SRC) tests/test_engine.cpp -o $@
+	$(CXX) $(CXXFLAGS) $(SRC) tests/test_$*.cpp -o $@
 
-test: $(BUILD)/test_engine
+test: $(BUILD)/test_engine $(BUILD)/test_toolkit
 	./$(BUILD)/test_engine
+	./$(BUILD)/test_toolkit
 
 clean:
-	rm -f $(BUILD)/queue_engine $(BUILD)/test_engine
+	rm -f $(BUILD)/queue_engine $(BUILD)/test_engine $(BUILD)/test_toolkit
 
 .PHONY: all test clean

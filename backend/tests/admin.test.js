@@ -18,6 +18,7 @@ const app = require('../app');
 const db = require('../config/db');
 const time = require('../utils/time');
 const adminAuthService = require('../services/adminAuthService');
+const { linkVerified } = require('./helpers/capHelper');
 
 let server;
 let base;
@@ -63,10 +64,7 @@ async function makeStudent(name, { cap = true, college = 'College of Engineering
   const cookie = login.cookie;
   const id = db.prepare('SELECT id FROM students WHERE email = ?').get(email).id;
   if (cap) {
-    const r = await call('PUT', '/api/cap-details', {
-      applicationId: `MH2026-${1000 + studentSeq}`, studentName: name, allottedCollege: college, courseBranch: 'Computer Engineering', capRound: round, allotmentStatus: 'Allotted',
-    }, cookie);
-    assert.equal(r.status, 200);
+    linkVerified(id, { applicationId: `MH2026-${1000 + studentSeq}`, name, college, round });
   }
   return { id, email, cookie, appId: `MH2026-${1000 + studentSeq}` };
 }
@@ -309,7 +307,7 @@ test('student detail shows the full application and never the password hash', as
   assert.equal(d.fee.amountPaid, 40000);
   assert.equal(d.fee.receiptNumber, 'DD-9911');
   assert.equal(d.documents.filter((x) => x.prepared).length, 2);
-  assert.equal(d.tasks.find((t) => t.key === 'fee_payment').status, 'in_progress');
+  assert.equal(d.tasks.find((t) => t.key === 'fee_payment').status, 'submitted');
   assert.equal(d.review.status, 'pending');
   assert.equal(d.verification.status, 'pending');
   assert.equal(d.appointment, null);
@@ -389,8 +387,8 @@ test('admin decisions appear on the student dashboard (and only the right studen
   const bob = (await call('GET', '/api/dashboard', undefined, s2.cookie)).json.data;
   assert.equal(bob.application.status, 'approved');
   assert.equal(bob.overallStatus, 'Admission Approved');
-  assert.equal(bob.tasks.find((t) => t.key === 'physical_verification').status, 'completed');
-  assert.equal(bob.tasks.find((t) => t.key === 'physical_verification').summary.startsWith('Verified on'), true);
+  assert.equal(bob.tasks.find((t) => t.key === 'physical_verification').status, 'not_started');
+  assert.equal(bob.tasks.find((t) => t.key === 'physical_verification').summary.startsWith('Originals verified on'), true);
 
   const carol = (await call('GET', '/api/dashboard', undefined, s3.cookie)).json.data;
   assert.equal(carol.application.status, 'rejected');
@@ -436,7 +434,7 @@ test('a student can mark requested corrections as done, which re-queues the appl
 test('admin updates do not alter what the student entered', async () => {
   const fee = (await call('GET', '/api/tasks/fee_payment', undefined, s1.cookie)).json.data;
   assert.equal(fee.details.amountPaid, 40000);
-  assert.equal(fee.task.status, 'in_progress');
+  assert.equal(fee.task.status, 'submitted');
   const cap = (await call('GET', '/api/cap-details', undefined, s1.cookie)).json.data.capDetails;
   assert.equal(cap.applicationId, s1.appId);
 });
@@ -601,7 +599,7 @@ test('verification outcome: validation, student sync, and appointment is closed 
 
   const prog = await put(s1.id, { status: 'in_progress', remarks: 'Checking originals' });
   assert.equal(prog.status, 200);
-  assert.equal((await call('GET', '/api/dashboard', undefined, s1.cookie)).json.data.tasks.find((t) => t.key === 'physical_verification').status, 'in_progress');
+  assert.equal((await call('GET', '/api/dashboard', undefined, s1.cookie)).json.data.tasks.find((t) => t.key === 'physical_verification').status, 'not_started');
   assert.equal(db.prepare("SELECT status FROM appointments WHERE id = ?").get(s1.apptId).status, 'scheduled');
 
   const done = await put(s1.id, { status: 'completed', remarks: 'All originals matched' });
@@ -612,8 +610,8 @@ test('verification outcome: validation, student sync, and appointment is closed 
   assert.equal(db.prepare('SELECT status FROM appointments WHERE id = ?').get(s1.apptId).status, 'completed');
 
   const task = (await call('GET', '/api/tasks/physical_verification', undefined, s1.cookie)).json.data;
-  assert.equal(task.task.status, 'completed');
-  assert.equal(task.task.statusLabel, 'Verified at College');
+  assert.equal(task.task.status, 'not_started');
+  assert.equal(task.task.statusLabel, 'Not Started');
   assert.equal(task.details.verifiedBy, 'Omkar Officer');
   assert.equal(task.details.remarks, 'All originals matched');
   assert.equal(task.details.appointment.status, 'completed');
@@ -625,6 +623,24 @@ test('verification outcome: validation, student sync, and appointment is closed 
 
   const stats = (await call('GET', '/api/admin/dashboard', undefined, sidOf.viewer)).json.data.stats;
   assert.equal(stats.verificationPending, 2); // s4 and s5 (s1, s2 verified; s3 rejected)
+});
+
+test('a requested physical-verification task is approved only after an officer records a successful in-person outcome', async () => {
+  const student = await makeStudent('Task Five Review Student');
+  const submit = await call('PUT', '/api/tasks/physical_verification', { action: 'submit', note: 'All originals are ready.' }, student.cookie);
+  assert.equal(submit.status, 200);
+  assert.equal(submit.json.data.task.status, 'pending_review');
+
+  const inProgress = await call('PUT', `/api/admin/students/${student.id}/verification`, { status: 'in_progress', remarks: 'Checking originals' }, sidOf.officer);
+  assert.equal(inProgress.status, 200);
+  assert.equal((await call('GET', '/api/tasks/physical_verification', undefined, student.cookie)).json.data.task.status, 'pending_review');
+
+  const completed = await call('PUT', `/api/admin/students/${student.id}/verification`, { status: 'completed', remarks: 'All originals matched' }, sidOf.officer);
+  assert.equal(completed.status, 200);
+  const task = (await call('GET', '/api/tasks/physical_verification', undefined, student.cookie)).json.data.task;
+  assert.equal(task.status, 'approved');
+  assert.equal(task.statusLabel, 'Approved');
+  assert.equal((await call('GET', '/api/dashboard', undefined, student.cookie)).json.data.progress.completed, 2);
 });
 
 // ---------------------------------------------------------------------------

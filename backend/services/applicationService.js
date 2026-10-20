@@ -115,6 +115,37 @@ function review(admin, studentId, { targetStatus, action, remarks, expectedStatu
   })();
 }
 
+/**
+ * Undo support (Phase 5): puts a decision back to what it was before. Refuses (STALE_UNDO) when the application
+ * has changed since, so an undo can never overwrite a newer decision by the student or another admin.
+ */
+function revertReview(admin, studentId, before, afterStatus) {
+  return db.transaction(() => {
+    const { student, applicationId } = requireApplication(studentId);
+    const current = getReview(studentId).status;
+    if (current !== afterStatus) {
+      throw new ApiError(409, 'This decision can no longer be undone: the application was changed after it.', null, 'STALE_UNDO');
+    }
+    const target = before.status;
+    db.prepare(
+      `INSERT INTO application_reviews (student_id, status, remarks, reviewed_by_name, reviewed_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(student_id) DO UPDATE SET status = excluded.status, remarks = excluded.remarks, reviewed_by_name = excluded.reviewed_by_name,
+         reviewed_by_admin_id = NULL, reviewed_at = excluded.reviewed_at, updated_at = excluded.updated_at`
+    ).run(studentId, target, target === 'pending' ? null : before.remarks, before.reviewedBy || null, before.reviewedAt || null);
+    db.prepare(
+      `INSERT INTO application_status_history (student_id, event_type, from_status, to_status, remarks, actor_type, admin_id, actor_name)
+       VALUES (?, 'status_change', ?, ?, 'The previous decision was reversed (undo).', 'admin', ?, ?)`
+    ).run(studentId, current, target, admin.id, admin.fullName);
+    activityService.log(admin, {
+      action: 'application.undo', student,
+      summary: `Undid the decision on application ${applicationId} of ${student.fullName}: ${LABELS[current]} \u2192 ${LABELS[target]}`,
+      details: { from: current, to: target },
+    });
+    return getReview(studentId);
+  })();
+}
+
 /** Internal note: stored in the history and the audit log, never shown to the student. */
 function addNote(admin, studentId, remarks) {
   return db.transaction(() => {
@@ -152,4 +183,4 @@ function resubmit(student, note) {
   })();
 }
 
-module.exports = { LABELS, hasApplication, requireStudent, requireApplication, getReview, getHistory, getStudentView, review, addNote, resubmit };
+module.exports = { LABELS, hasApplication, requireStudent, requireApplication, getReview, getHistory, getStudentView, review, revertReview, addNote, resubmit };

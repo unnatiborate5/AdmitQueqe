@@ -5,9 +5,15 @@ const { assertValid, validateRegistration, validateLogin } = require('../utils/v
 const { getSessionToken, setSessionCookie, clearSessionCookie } = require('../middleware/auth');
 
 const register = asyncHandler(async (req, res) => {
-  const { errors, values } = validateRegistration(req.body);
-  assertValid(errors);
-  const student = await authService.register(values);
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  let student;
+  if (body.applicationId !== undefined || !body.email) {
+    student = await authService.register(body);
+  } else {
+    const { errors, values } = validateRegistration(req.body);
+    assertValid(errors);
+    student = await authService.register(values);
+  }
   res.status(201).json({
     success: true,
     message: 'Account created successfully. Please log in.',
@@ -16,11 +22,17 @@ const register = asyncHandler(async (req, res) => {
 });
 
 const login = asyncHandler(async (req, res) => {
-  const { errors, values } = validateLogin(req.body);
-  assertValid(errors);
-  const { token, student } = await authService.login(values);
-  setSessionCookie(res, token);
-  res.json({ success: true, message: 'Login successful.', data: { student } });
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  let result;
+  if (body.applicationId !== undefined || !body.email) {
+    result = await authService.login(body);
+  } else {
+    const { errors, values } = validateLogin(body);
+    assertValid(errors);
+    result = await authService.login(values);
+  }
+  setSessionCookie(res, result.token);
+  res.json({ success: true, message: 'Login successful.', data: { student: result.student } });
 });
 
 const logout = asyncHandler(async (req, res) => {

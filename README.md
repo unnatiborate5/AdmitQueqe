@@ -10,7 +10,8 @@ checklist, and status around it.
 - Phase 2: Student Portal - done (registration, login/logout, dashboard, progress tracker, and a clickable form for each of the six admission tasks)
 - **Phase 3: College Admin Portal - done** (admin login with roles, live dashboard, student search/filter/inspect, application review with remarks and status history, verification appointments, activity history)
 - **Phase 4: Queue & Token Management - done** (C++ queue engine with FIFO queue, priority queue and hash maps; check-in tokens, priority policy, multiple counters, no-show handling; admin queue page and live student token card)
-- Not yet built: admission workflow engine / graph algorithms (Phase 5), notifications, payments (later phases)
+- **Phase 5: Syllabus DSA features - done** (all in the C++ engine: binary + linear search behind a global admin search box, merge-sort ranked worklists, a stack-based undo for admin actions, a sparse matrix for appointment load and a dense matrix for document readiness)
+- Not yet built: admission workflow engine, graph algorithms, notifications, payments (later phases)
 
 ## Tech Stack
 - Frontend: HTML, CSS, JavaScript, Bootstrap 5 (loaded from a CDN, so an internet connection is needed for styling)
@@ -59,7 +60,8 @@ Demo students use the password `Student@2026` (aarav.demo@example.com, sneha.dem
 |---|---|
 | `/admin/dashboard.html` | Total, pending, approved, rejected and verification-pending counts from the database; upcoming appointments; recent activity |
 | `/admin/students.html` | Search (name, email, phone, application ID, college), filter (review status, verification, appointment, CAP round), sort, paginate |
-| `/admin/student.html?id=` | Full application: CAP details, task progress, documents, fee; approve / reject / request corrections with remarks; internal notes; record verification outcome; schedule, reschedule and update the appointment; status history |
+| `/admin/cap-records.html` | CAP allotment records: add, import (CSV), correct, verify, revoke, unlink, history; student claims waiting for verification |
+| `/admin/student.html?id=` | Full application: CAP details (and which verified record backs them), task progress, documents, fee; approve / reject / request corrections with remarks; internal notes; record verification outcome; schedule, reschedule and update the appointment; status history |
 | `/admin/appointments.html` | All appointments by status, schedule new, reschedule, mark completed / missed, cancel |
 | `/admin/activity.html` | Every administrative action with admin name, role and timestamp (Super Admin only) |
 
@@ -97,12 +99,50 @@ Rules worth knowing:
 - Roles: everyone can view the queue, officers and super admins operate it, only super admins add counters.
 - Where each data structure is and why: [`cpp_engine/README.md`](cpp_engine/README.md).
 
+## CAP allotment verification
+
+Students no longer type their allotment details. The college admission cell keeps **trusted records**, an admin **verifies** them, and a student is linked to a record only when it is verified.
+
+**Honest scope:** AdmitFlow is **not connected to the official CAP portal** and does not claim to be. Records come from the CAP allotment list that the admission cell types in or imports as CSV. AdmitFlow never asks for, accepts or stores a CAP portal password (there is no such field anywhere, and any extra field sent to the API is refused).
+
+How it works:
+1. **Staff add records** (Admin > CAP records > Add record, or Import CSV with columns `application_id, candidate_name, allotted_college, course_branch, cap_round, allotment_status`). New records are **pending verification**.
+2. **A different admin verifies** each record (four-eyes: the admin who last changed a record cannot verify it; super admins are exempt). Verification and corrections are limited to officers and super admins; viewers have no access to CAP records.
+3. **The student submits only their application ID** (Student > CAP details). If a verified, unlinked record with a matching name exists, their college, branch, round and allotment status are filled in automatically and are **read-only**. Otherwise they see **"Verification pending"**. The message is the same whether the ID does not exist, is unverified, was revoked, has a different name, or belongs to someone else, so IDs cannot be probed. Wrong guesses are rate limited (10 per 15 minutes).
+4. **Waiting students are linked automatically** the moment a matching record is verified. If the registered name and the record's name differ, an admin decides under **Student claims** (approve with remarks, or reject with a reason the student sees).
+5. **Corrections** need remarks and are written to the record's history with before/after values and the admin's name; a corrected verified record stays verified and the student's details are updated. The application ID of a linked record is locked; use **Unlink** (with remarks) if the wrong account was linked.
+
+Name matching is word-based: every word of the shorter name must appear in the longer one (order and middle/father's names do not matter; a one-word name must match exactly).
+
+**Existing data:** CAP details that students typed before this feature are not trusted. On first start they are moved into the verification queue as *pending* records (source "typed by the student") with a pending claim for that student, and the unverified row is removed from the student's details. Nothing is deleted. Those students see "verification pending" until an admin verifies the record, which re-creates their details. Running it again changes nothing.
+
+**Duplicates:** an application ID can exist once (database `UNIQUE`, case-insensitive), a record can be linked to one student and a student to one record (partial unique indexes). Imports never overwrite: duplicates are reported and skipped.
+
+**Why the C++ engine is not used for CAP lookups:** looking a record up by application ID is an indexed `UNIQUE` lookup in SQLite (O(log n); the tests check the query plan). That index is also what guarantees no duplicates, inside the same transaction as the link. A second in-memory copy (a hash map in the engine) would duplicate the data, need constant syncing, and could be stale at exactly the moment it matters, so none was added. The engine's existing application-ID search index (binary search, admin search box only) still works and only ever contains verified, linked students. No search structure takes part in authentication or authorisation: every route checks the session and the role before any lookup.
+
+Demo: `npm run seed:demo` creates verified records for the demo students, two pending records, and a pending claim (isha.demo@example.com). Log in as the officer (who entered the records), see that **Verify** is disabled, log in as the super admin, verify `MH2026-10099`, and Isha's details appear.
+
+## Search, planner and undo (Phase 5)
+
+All computation is done by the C++ engine (`cpp_engine/`); the pages only show the results. Details and the reasoning behind each choice: [`cpp_engine/README.md`](cpp_engine/README.md).
+
+| Where | What it does | DSA concept |
+|---|---|---|
+| Search box in every admin page | Finds students by application ID or ID prefix, by token (today), or by a piece of a name. Shows which algorithm ran and how many steps it took | Binary search (ID, token) and linear search (name) on a merge-sorted index |
+| **Admin > Planner**, "Needs a verification appointment" | Students without an appointment, ranked: returning students, then late CAP rounds, then regular; longest waiting first. A Schedule button on each row | Merge sort (stable, several keys) |
+| Planner, "Today's appointments" | Today's list sorted by appointment time, by priority, or by queue token | Merge sort |
+| Planner, "Appointment load" | Days x half-hour slots heat map, busiest slots, least busy slot per day. The scheduling dialog warns when a slot is already booked and offers the least busy time | Sparse matrix |
+| Planner, "Document readiness" | Documents x CAP rounds counts and percentages, weakest document per round | Dense matrix |
+| **Undo** button (navbar, officers and super admins) | Reverses your most recent application decision or appointment reschedule, newest first. Refuses (and removes the entry) if the record was changed again afterwards, so newer work is never overwritten | Stack |
+
+Undo rules: each admin has their own stack of up to 20 changes; an undo is itself recorded in the status history and activity log and is not undoable (there is no redo); the stack survives restarts.
+
 ## The six tasks
 Click any task on the dashboard (or on the Checklist page) to open its window:
 
 | Task | What the student can do |
 |---|---|
-| CAP Details | Enter or edit application ID, college, branch, round and allotment status |
+| CAP Details | Submit your CAP application ID. College, branch, round and allotment status are filled in (read-only) once the admission cell has verified your record |
 | CAP Allotment Acceptance | Record status, acceptance date and a note |
 | Admission Form | Record status (not filled / partial / submitted), date and a note |
 | Document Preparation | Tick prepared documents; status is worked out automatically |
@@ -116,8 +156,8 @@ Everything is saved in SQLite and shown on the dashboard. Existing databases are
 cd AdmitFlow/backend
 npm test
 ```
-There are four test files: `api.test.js` (student portal), `admin.test.js` (admin portal), `queue.test.js` (tokens and queues) and `engine.cpp.test.js` (compiles and runs the C++ unit tests).
-The student test covers Register, Login, CAP details, all five task forms (including validation and the rule that students cannot verify their own documents), Dashboard and Logout against a temporary database.
+There are six test files: `api.test.js` (student portal), `admin.test.js` (admin portal), `queue.test.js` (tokens and queues) and `cap.test.js` (CAP verification), `dsa.test.js` (search, sorting, undo stack, matrices) and `engine.cpp.test.js` (compiles and runs both C++ unit-test programs).
+The student test covers Register, Login, CAP verification (read-only details, pending state), all five task forms (including validation and the rule that students cannot verify their own documents), Dashboard and Logout against a temporary database.
 
 ## Project Structure
 ```
@@ -140,7 +180,7 @@ AdmitFlow/
 │   ├── scripts/       create-admin, seed:demo
 │   ├── utils/         validators, ApiError, asyncHandler
 │   └── tests/         API end-to-end test
-├── cpp_engine/        C++ queue engine: include/dsa (FifoQueue, MinHeap, HashMap), engine, protocol, tests, Makefile
+├── cpp_engine/        C++ engine: include/dsa (FifoQueue, MinHeap, HashMap, Stack, SparseMatrix, DenseMatrix), include/algo (merge sort, searching), queue engine, search index, planner, reports, tests, Makefile
 ├── database/          schema.sql (the .db file is git-ignored)
 ├── docs/              api.md
 ├── README.md

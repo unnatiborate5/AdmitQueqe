@@ -11,6 +11,8 @@ const verificationAdminService = require('./verificationAdminService');
 const applicationService = require('./applicationService');
 const appointmentService = require('./appointmentService');
 const queueService = require('./queueService');
+const capRecordService = require('./capRecordService');
+const uploadService = require('./uploadService');
 const { parsePaging, pick, likeTerm } = require('../utils/adminValidators');
 
 const REVIEW_FILTERS = ['pending', 'approved', 'rejected', 'correction_requested', 'not_started'];
@@ -101,11 +103,16 @@ function getDetail(studentId) {
   return {
     student: { ...student, registeredAt: s.created_at },
     cap,
+    capVerification: capRecordService.adminViewForStudent(s.id),
     hasApplication: Boolean(cap),
     review: cap ? applicationService.getReview(s.id) : { status: 'not_started', label: applicationService.LABELS.not_started },
     history: applicationService.getHistory(s.id),
     progress: summary.progress,
-    tasks: summary.tasks.map((t) => ({ key: t.key, title: t.title, status: t.status, statusLabel: t.statusLabel, summary: t.summary })),
+    tasks: summary.tasks.map((t) => ({
+      key: t.key, title: t.title, status: t.status, statusLabel: t.statusLabel, summary: t.summary,
+      correctionReason: t.correctionReason || null,
+      files: t.key === 'cap_details' ? [] : uploadService.list(s.id, t.key),
+    })),
     records: { allotmentAcceptance: accept, admissionForm: form },
     documents: documentService.getDocuments(s.id).map((d) => ({ key: d.key, title: d.title, required: d.required, prepared: d.prepared })),
     fee: feeService.get(s.id),

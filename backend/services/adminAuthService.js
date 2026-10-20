@@ -11,8 +11,8 @@ const ROLE_LABELS = { super_admin: 'Super Admin', admission_officer: 'Admission 
 
 /** What each role may do. Every protected admin route names exactly one permission. */
 const PERMISSIONS = {
-  super_admin: ['dashboard:view', 'students:view', 'applications:review', 'appointments:manage', 'verification:record', 'queue:view', 'queue:operate', 'queue:configure', 'activity:view'],
-  admission_officer: ['dashboard:view', 'students:view', 'applications:review', 'appointments:manage', 'verification:record', 'queue:view', 'queue:operate'],
+  super_admin: ['dashboard:view', 'students:view', 'applications:review', 'appointments:manage', 'verification:record', 'queue:view', 'queue:operate', 'queue:configure', 'cap:view', 'cap:manage', 'cap:verify', 'activity:view'],
+  admission_officer: ['dashboard:view', 'students:view', 'applications:review', 'appointments:manage', 'verification:record', 'queue:view', 'queue:operate', 'cap:view', 'cap:manage', 'cap:verify'],
   viewer: ['dashboard:view', 'students:view', 'queue:view'],
 };
 

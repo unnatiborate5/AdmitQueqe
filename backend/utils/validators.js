@@ -3,6 +3,8 @@ const ApiError = require('./ApiError');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const NAME_RE = /^\p{L}[\p{L} .'-]{1,99}$/u;
+// CAP lists often print names as "SURNAME, FIRSTNAME", so a comma is allowed for CAP records (not for registration)
+const CAP_NAME_RE = /^\p{L}[\p{L} .,'-]{1,99}$/u;
 const PHONE_RE = /^[6-9]\d{9}$/;
 const APP_ID_RE = /^[A-Z0-9][A-Z0-9-]{4,19}$/;
 
@@ -82,7 +84,7 @@ function validateCapDetails(body, options) {
   }
 
   if (!studentName) errors.studentName = 'Student name is required.';
-  else if (!NAME_RE.test(studentName)) errors.studentName = 'Enter a valid name as printed on your allotment letter.';
+  else if (!CAP_NAME_RE.test(studentName)) errors.studentName = 'Enter a valid name as printed on the CAP allotment list (letters, spaces, . , \' - allowed).';
 
   if (!allottedCollege) errors.allottedCollege = 'Allotted college is required.';
   else if (allottedCollege.length < 3 || allottedCollege.length > 150) {
@@ -216,6 +218,6 @@ function validateFee(body, statuses, paymentModes) {
 }
 
 module.exports = {
-  assertValid, validateRegistration, validateLogin, validateCapDetails,
+  APP_ID_RE, clean, assertValid, validateRegistration, validateLogin, validateCapDetails,
   validateStatusRecord, validateDocuments, validateFee,
 };

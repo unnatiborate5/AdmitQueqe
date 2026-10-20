@@ -46,6 +46,23 @@
     { label: 'Save', cls: 'btn-primary', type: 'submit', form: 'task-form', act: 'save' },
   ]);
 
+  const requiresCompletionEvidence = (status) => status === 'completed';
+  const canRequestVerification = (status) => ['not_started', 'correction_required'].includes(status);
+
+  const evidenceField = (slot, label, existing) => field(label, {
+    id: `upload-${slot}`,
+    html: `<input class="form-control" id="upload-${esc(slot)}" name="upload-${esc(slot)}" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">`,
+  }, `${existing ? `Current upload: ${existing.originalName}. Choose a file to replace it.` : 'PDF, JPEG or PNG; maximum 5 MB.'}`);
+
+  async function uploadSelected(form, taskKey, slot) {
+    const control = form.elements[`upload-${slot}`];
+    if (!control || !control.files || !control.files[0]) return;
+    const body = new FormData();
+    body.append('slot', slot);
+    body.append('file', control.files[0]);
+    await Api.upload(`/api/tasks/${encodeURIComponent(taskKey)}/uploads`, body);
+  }
+
   function loadingView(m) {
     m.body.innerHTML = '<div class="spinner-wrap py-4"><div class="spinner-border text-primary mb-2" aria-hidden="true"></div><div>Loading</div></div>';
     setFooter(m, [{ label: 'Cancel', cls: 'btn-outline-secondary', act: 'cancel' }]);
@@ -67,6 +84,7 @@
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (m.busy) return;
       m.alertArea.innerHTML = '';
       UI.clearFieldErrors(form);
 
@@ -95,48 +113,38 @@
     Modal.focusFirst(m);
   }
 
-  // ---------- 1. CAP details ----------
-  async function renderCap(m, ctx) {
-    const res = await Api.get('/api/cap-details');
-    const { capDetails: c, options } = res.data;
-    const v = c || { studentName: ctx.studentName || '' };
-    m.setTitle(TITLES.cap_details);
-    m.body.innerHTML = `
-      <p class="text-muted">Copy these from your CAP allotment letter. You can edit them later if something changes.</p>
-      <form id="task-form" novalidate>
-        <div class="row">
-          <div class="col-md-6">${field('Application ID', input('f-applicationId', 'applicationId', v.applicationId, 'maxlength="20" autocomplete="off"'), '5-20 letters, numbers or hyphens.')}</div>
-          <div class="col-md-6">${field('Student name', input('f-studentName', 'studentName', v.studentName, 'maxlength="100"'), 'As printed on the allotment letter.')}</div>
-        </div>
-        ${field('Allotted college', input('f-allottedCollege', 'allottedCollege', v.allottedCollege, 'maxlength="150"'))}
-        ${field('Course / branch', input('f-courseBranch', 'courseBranch', v.courseBranch, 'maxlength="100"'))}
-        <div class="row">
-          <div class="col-md-6">${field('CAP round', select('f-capRound', 'capRound', options.capRounds, v.capRound, 'Select round'))}</div>
-          <div class="col-md-6">${field('Allotment status', select('f-allotmentStatus', 'allotmentStatus', options.allotmentStatuses, v.allotmentStatus, 'Select status'))}</div>
-        </div>
-      </form>`;
-    saveCancel(m);
+  // ---------- 1. CAP details (read-only; the student only submits an application ID) ----------
+  const CAP_NOTICE = 'AdmitFlow is not connected to the official CAP portal. Never enter your CAP portal password here: nobody at the college will ask for it.';
 
-    const labels = {
-      applicationId: 'Application ID is required.', studentName: 'Student name is required.',
-      allottedCollege: 'Allotted college is required.', courseBranch: 'Course / branch is required.',
-      capRound: 'CAP round is required.', allotmentStatus: 'Allotment status is required.',
-    };
-    wireForm(m, {
-      validate(form) {
-        const e = {};
-        Object.keys(labels).forEach((k) => { if (!form.elements[k].value.trim()) e[k] = labels[k]; });
-        const id = form.elements.applicationId.value.trim();
-        if (id && !/^[A-Za-z0-9][A-Za-z0-9-]{4,19}$/.test(id)) e.applicationId = 'Application ID must be 5-20 characters (letters, numbers, hyphen).';
-        return e;
-      },
-      request(form) {
-        const data = {};
-        Object.keys(labels).forEach((k) => { data[k] = form.elements[k].value.trim(); });
-        return Api.put('/api/cap-details', data);
-      },
-      onSaved: ctx.onSaved,
-    });
+  function capSummaryHtml(c) {
+    return `<dl class="cap-summary mb-3">
+      <dt>Allotted college</dt><dd>${esc(c.allottedCollege)}</dd><dt>Course / branch</dt><dd>${esc(c.courseBranch)}</dd>
+      <dt>CAP round</dt><dd>${esc(c.capRound)}</dd><dt>Allotment status</dt><dd>${esc(c.allotmentStatus)}</dd>
+      <dt>Application ID</dt><dd>${esc(c.applicationId)}</dd><dt>Name on the CAP list</dt><dd>${esc(c.studentName)}</dd></dl>`;
+  }
+
+  async function renderCap(m, ctx) {
+    const { capDetails: c, verification: ver } = (await Api.get('/api/cap-details')).data;
+    m.setTitle(TITLES.cap_details);
+    if (c) {
+      const isVerified = Boolean(c.verified || (ver && ver.status === 'verified'));
+      const statusAlert = isVerified
+        ? `<div class="alert alert-success py-2" role="status">Verified by the college admission cell${ver && ver.verifiedAt ? ` on ${esc(UI.formatDate(ver.verifiedAt))}` : ''}.</div>`
+        : '<div class="alert alert-warning py-2" role="status"><strong>Verification pending.</strong> The college admission cell has not verified this allotment record yet.</div>';
+      m.body.innerHTML = `${statusAlert}
+        ${capSummaryHtml(c)}<p class="small text-muted mb-0">These details are read-only and maintained by the college admission cell.</p>`;
+      setFooter(m, [
+        { label: 'Close', cls: 'btn-outline-secondary', act: 'cancel' },
+        { label: 'Open full CAP details', cls: 'btn-primary', act: 'view-page' },
+      ]);
+      m.footer.querySelector('[data-act=cancel]').addEventListener('click', () => m.close());
+      m.footer.querySelector('[data-act=view-page]').addEventListener('click', () => { m.close(); window.location.href = 'cap-details.html'; });
+      return;
+    }
+    m.body.innerHTML = `
+      <div class="alert alert-info py-2" role="status">No CAP allotment details found. Please contact the admission cell.</div>`;
+    setFooter(m, [{ label: 'Close', cls: 'btn-primary', act: 'cancel' }]);
+    m.footer.querySelector('[data-act=cancel]').addEventListener('click', () => m.close());
   }
 
   // ---------- 2 + 3. Allotment acceptance / admission form ----------
@@ -147,16 +155,31 @@
     m.body.innerHTML = `
       <p class="text-muted mb-2">${esc(task.description)}</p>
       <p class="guidance mb-3">${esc(task.guidance)}</p>
+      <div class="mb-3">${UI.statusPill(task.status, task.statusLabel)}${task.correctionReason ? `<div class="alert alert-warning mt-2 mb-0">${esc(task.correctionReason)}</div>` : ''}</div>
       <form id="task-form" novalidate>
-        ${field('Status', select('f-status', 'status', task.statusOptions, task.status))}
+        ${field('Status', select('f-status', 'status', task.statusOptions, task.reportedStatus || 'pending'))}
         <div id="date-wrap">${field(dateLabel, input('f-eventDate', 'eventDate', details.eventDate, `type="date" max="${todayLocal()}"`), 'Required once this is complete.')}</div>
         ${field('Notes (optional)', { id: 'f-note', html: `<textarea class="form-control" id="f-note" name="note" rows="3" maxlength="300">${esc(details.note || '')}</textarea>` }, 'Up to 300 characters.')}
+        <div id="completion-evidence">${evidenceField(details.requiredSlot, task.key === 'allotment_acceptance' ? 'CAP allotment acceptance receipt' : 'Completed admission form', details.files.find((f) => f.slot === details.requiredSlot))}</div>
       </form>`;
     saveCancel(m);
+    m.footer.querySelector('[data-act=save]').textContent = 'Submit for review';
 
     const form = m.body.querySelector('#task-form');
     const dateWrap = m.body.querySelector('#date-wrap');
-    const sync = () => dateWrap.classList.toggle('d-none', form.elements.status.value === 'pending');
+    const evidenceWrap = m.body.querySelector('#completion-evidence');
+    const evidenceInput = form.elements[`upload-${details.requiredSlot}`];
+    const sync = () => {
+      const completed = requiresCompletionEvidence(form.elements.status.value);
+      dateWrap.classList.toggle('d-none', form.elements.status.value === 'pending');
+      evidenceWrap.classList.toggle('d-none', !completed);
+      if (!completed) {
+        evidenceInput.value = '';
+        evidenceInput.classList.remove('is-invalid');
+        const feedback = evidenceInput.parentElement.querySelector('.invalid-feedback');
+        if (feedback) feedback.textContent = '';
+      }
+    };
     form.elements.status.addEventListener('change', sync);
     sync();
 
@@ -172,11 +195,13 @@
         }
         return e;
       },
-      request(f) {
+      async request(f) {
+        if (requiresCompletionEvidence(f.elements.status.value)) await uploadSelected(f, task.key, details.requiredSlot);
         return Api.put(`/api/tasks/${task.key}`, {
           status: f.elements.status.value,
           eventDate: f.elements.eventDate.value,
           note: f.elements.note.value,
+          action: 'submit',
         });
       },
       onSaved: ctx.onSaved,
@@ -187,10 +212,14 @@
   function renderDocuments(m, ctx, data) {
     const { task, details } = data;
     const row = (d) => `
-      <label class="doc-row">
+      <div class="doc-row">
+        <label>
         <input class="form-check-input" type="checkbox" name="doc" value="${esc(d.key)}" data-required="${d.required}" ${d.prepared ? 'checked' : ''}>
         <span><span class="doc-title">${esc(d.title)}</span><span class="doc-note">${esc(d.note)}</span></span>
-      </label>`;
+        </label>
+        <input class="form-control form-control-sm mt-2" type="file" name="upload-${esc(d.key)}" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
+        <div class="form-text">${d.file ? `Current upload: ${esc(d.file.originalName)}. Choose a file to replace it.` : 'PDF, JPEG or PNG; maximum 5 MB.'}</div>
+      </div>`;
     const required = details.documents.filter((d) => d.required);
     const optional = details.documents.filter((d) => !d.required);
     m.setTitle(task.title);
@@ -204,6 +233,7 @@
         <fieldset><legend class="doc-legend">Only if applicable</legend>${optional.map(row).join('')}</fieldset>
       </form>`;
     saveCancel(m);
+    m.footer.querySelector('[data-act=save]').textContent = 'Submit for review';
 
     const boxes = Array.from(m.body.querySelectorAll('input[name=doc]'));
     const options = task.statusOptions;
@@ -220,17 +250,19 @@
     sync();
 
     wireForm(m, {
-      request() {
-        return Api.put('/api/tasks/document_preparation', { preparedDocs: boxes.filter((b) => b.checked).map((b) => b.value) });
+      async request(f) {
+        for (const box of boxes) if (box.checked) await uploadSelected(f, task.key, box.value);
+        return Api.put('/api/tasks/document_preparation', { preparedDocs: boxes.filter((b) => b.checked).map((b) => b.value), action: 'submit' });
       },
       onSaved: ctx.onSaved,
     });
   }
 
-  // ---------- 5. Physical verification (read-only) ----------
+  // ---------- 5. Physical verification ----------
   function renderVerification(m, ctx, data) {
     const { task, details } = data;
-    const done = task.status === 'completed';
+    const done = task.status === 'approved';
+    const canRequest = canRequestVerification(task.status);
     m.setTitle(task.title);
     m.body.innerHTML = `
       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -254,13 +286,23 @@
       <div class="guidance d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span>${details.documentsPrepared} of ${details.documentsRequired} required documents prepared</span>
         <button type="button" class="btn btn-sm btn-outline-primary" data-act="docs">Review documents</button>
-      </div>`;
-    setFooter(m, [{ label: 'Close', cls: 'btn-outline-secondary', act: 'cancel' }]);
+      </div>
+      ${task.status === 'pending_review' ? '<div class="alert alert-info mt-3 mb-0" role="status">Your verification request is pending review by the admission officer.</div>' : ''}
+      ${canRequest ? `<form id="task-form" novalidate class="mt-3">
+        ${field('Note (optional)', { id: 'f-note', html: '<textarea class="form-control" id="f-note" name="note" rows="2" maxlength="300"></textarea>' })}
+      </form>` : ''}`;
+    setFooter(m, [
+      { label: 'Close', cls: 'btn-outline-secondary', act: 'cancel' },
+      ...(canRequest ? [{ label: 'Submit verification request', cls: 'btn-primary', type: 'submit', form: 'task-form', act: 'save' }] : []),
+    ]);
     m.footer.querySelector('[data-act=cancel]').addEventListener('click', () => m.close());
     m.body.querySelector('[data-act=docs]').addEventListener('click', () => {
       m.close();
       open('document_preparation', ctx);
     });
+    if (canRequest) {
+      wireForm(m, { request(f) { return Api.put(`/api/tasks/${task.key}`, { action: 'submit', note: f.elements.note.value }); }, onSaved: ctx.onSaved });
+    }
   }
 
   // ---------- 6. Fee / payment ----------
@@ -271,7 +313,7 @@
       <h3 class="h6 fw-bold">Before you pay</h3>
       <ul class="guidance ps-4 mb-3">${details.instructions.map((s) => `<li class="mb-1">${esc(s)}</li>`).join('')}</ul>
       <form id="task-form" novalidate>
-        ${field('Payment status', select('f-status', 'status', task.statusOptions, task.status))}
+        ${field('Payment status', select('f-status', 'status', task.statusOptions, task.reportedStatus || 'pending'))}
         ${field('Total fee in rupees (optional)', input('f-totalFee', 'totalFee', details.totalFee, 'type="number" min="0" step="0.01" inputmode="decimal"'), 'From your college notice. Helps check partial payments.')}
         <div id="pay-wrap">
           <div class="row">
@@ -280,9 +322,11 @@
           </div>
           ${field('Payment mode', select('f-paymentMode', 'paymentMode', details.paymentModes, details.paymentMode, 'Select mode'))}
           ${field('Receipt / transaction number', input('f-receiptNumber', 'receiptNumber', details.receiptNumber, 'maxlength="40" autocomplete="off"'))}
+          ${evidenceField('receipt', 'Payment receipt', details.files.find((f) => f.slot === 'receipt'))}
         </div>
       </form>`;
     saveCancel(m);
+    m.footer.querySelector('[data-act=save]').textContent = 'Submit for review';
 
     const form = m.body.querySelector('#task-form');
     const payWrap = m.body.querySelector('#pay-wrap');
@@ -310,11 +354,13 @@
         else if (date > todayLocal()) e.paidOn = 'The date cannot be in the future.';
         return e;
       },
-      request(f) {
+      async request(f) {
+        await uploadSelected(f, task.key, 'receipt');
         const g = (n) => f.elements[n].value.trim();
         return Api.put('/api/tasks/fee_payment', {
           status: g('status'), totalFee: g('totalFee'), amountPaid: g('amountPaid'),
           paymentMode: g('paymentMode'), receiptNumber: g('receiptNumber'), paidOn: g('paidOn'),
+          action: 'submit',
         });
       },
       onSaved: ctx.onSaved,
@@ -335,10 +381,10 @@
       if (err.status === 401) { window.location.replace('login.html'); return; }
       if (err.code === 'CAP_DETAILS_REQUIRED') {
         m.setTitle(TITLES[taskKey] || 'Task');
-        m.body.innerHTML = '<p class="mb-0">Enter your CAP details first. Your admission tasks are set up from them.</p>';
+        m.body.innerHTML = '<p class="mb-0">Your CAP details must be verified by the admission cell first. Your admission tasks are set up from them.</p>';
         setFooter(m, [
           { label: 'Cancel', cls: 'btn-outline-secondary', act: 'cancel' },
-          { label: 'Enter CAP details', cls: 'btn-primary', act: 'cap' },
+          { label: 'Check CAP verification', cls: 'btn-primary', act: 'cap' },
         ]);
         m.footer.querySelector('[data-act=cancel]').addEventListener('click', () => m.close());
         m.footer.querySelector('[data-act=cap]').addEventListener('click', () => { m.close(); open('cap_details', ctx); });
@@ -356,5 +402,5 @@
     return m;
   }
 
-  window.Tasks = { open, TITLES };
+  window.Tasks = { open, TITLES, requiresCompletionEvidence, canRequestVerification };
 })();
