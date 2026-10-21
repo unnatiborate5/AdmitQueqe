@@ -1,160 +1,306 @@
-#include "protocol.hpp"
+// AdmitFlow Protocol Implementation
+// Handles command line parsing and JSON formatting for the Queue Engine.
 
-#include <cstdlib>
-#include <sstream>
+#include <iostream>
+#include <string>
 #include <vector>
+#include <sstream>
+#include <cstdlib>
+
+#include "protocol.h"
+#include "queue_engine.h"
+
+using namespace std;
 
 namespace admitflow {
 
 namespace {
 
-std::string esc(const std::string& s) {
-  std::string out;
-  for (char c : s) {
-    if (c == '"' || c == '\\') { out += '\\'; out += c; }
-    else if (static_cast<unsigned char>(c) < 0x20) out += ' ';
-    else out += c;
+// Escapes special characters for JSON strings
+string escapeJsonString(const string& input) {
+  string escaped;
+  for (char ch : input) {
+    if (ch == '"' || ch == '\\') {
+      escaped += '\\';
+      escaped += ch;
+    } else if (static_cast<unsigned char>(ch) < 0x20) {
+      escaped += ' ';
+    } else {
+      escaped += ch;
+    }
   }
-  return out;
+  return escaped;
 }
 
-bool toInt(const std::string& s, long long& out) {
-  if (s.empty()) return false;
-  char* end = nullptr;
-  long long v = std::strtoll(s.c_str(), &end, 10);
-  if (end == s.c_str() || *end != '\0') return false;
-  out = v;
+// Parses string into a signed 64-bit integer
+bool parseInteger(const string& str, long long& result) {
+  if (str.empty()) {
+    return false;
+  }
+  char* endPointer = nullptr;
+  long long value = strtoll(str.c_str(), &endPointer, 10);
+  if (endPointer == str.c_str() || *endPointer != '\0') {
+    return false;
+  }
+  result = value;
   return true;
 }
 
-std::string errorJson(const std::string& error, const std::string& message) {
-  return "{\"ok\":false,\"error\":\"" + esc(error) + "\",\"message\":\"" + esc(message) + "\"}";
+// Builds standard error JSON response
+string buildErrorJson(const string& errorCode, const string& errorMessage) {
+  return "{\"ok\":false,\"error\":\"" + escapeJsonString(errorCode) +
+         "\",\"message\":\"" + escapeJsonString(errorMessage) + "\"}";
 }
 
-bool parseStatus(const std::string& s, Status& out) {
-  if (s == "waiting") out = Status::Waiting;
-  else if (s == "called") out = Status::Called;
-  else if (s == "serving") out = Status::Serving;
-  else return false;
-  return true;
+// Parses token status text
+bool parseTokenStatus(const string& statusStr, Status& outStatus) {
+  if (statusStr == "waiting") {
+    outStatus = Status::Waiting;
+    return true;
+  }
+  if (statusStr == "called") {
+    outStatus = Status::Called;
+    return true;
+  }
+  if (statusStr == "serving") {
+    outStatus = Status::Serving;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
 
-std::string jsonEscape(const std::string& s) { return esc(s); }
-
-std::string tokenJson(const TokenView& v) {
-  const Token& t = v.token;
-  std::ostringstream o;
-  o << "{\"code\":\"" << esc(t.code) << "\",\"seq\":" << t.seq << ",\"lane\":\"" << QueueEngine::laneName(t.lane)
-    << "\",\"level\":" << t.level << ",\"status\":\""
-    << (v.finalStatus.empty() ? QueueEngine::statusName(t.status) : v.finalStatus.c_str())
-    << "\",\"counterId\":" << t.counterId << ",\"studentId\":" << t.studentId << ",\"applicationId\":\"" << esc(t.appId)
-    << "\",\"position\":" << v.position << ",\"ahead\":" << v.ahead << "}";
-  return o.str();
+string jsonEscape(const string& str) {
+  return escapeJsonString(str);
 }
 
-std::string resultJson(const QueueEngine& engine, const Result& r) {
-  if (!r.ok) {
-    std::string out = "{\"ok\":false,\"error\":\"" + esc(r.error) + "\",\"message\":\"" + esc(r.message) + "\"";
-    if (r.hasToken) out += ",\"token\":" + tokenJson(r.token);
-    return out + "}";
-  }
-  std::string out = "{\"ok\":true";
-  if (r.hasToken) out += ",\"token\":" + tokenJson(r.token);
-  out += ",\"returned\":[";
-  for (std::size_t i = 0; i < r.returned.size(); ++i) {
-    if (i) out += ",";
-    out += tokenJson(r.returned[i]);
-  }
-  out += "],\"streak\":" + std::to_string(engine.streak()) + "}";
-  return out;
+// Serializes a TokenView into JSON
+string tokenJson(const TokenView& view) {
+  const Token& token = view.token;
+  ostringstream jsonStream;
+
+  const char* statusText = view.finalStatus.empty()
+                               ? QueueEngine::statusName(token.status)
+                               : view.finalStatus.c_str();
+
+  jsonStream << "{\"code\":\"" << escapeJsonString(token.code) << "\""
+             << ",\"seq\":" << token.seq
+             << ",\"lane\":\"" << QueueEngine::laneName(token.lane) << "\""
+             << ",\"level\":" << token.level
+             << ",\"status\":\"" << statusText << "\""
+             << ",\"counterId\":" << token.counterId
+             << ",\"studentId\":" << token.studentId
+             << ",\"applicationId\":\"" << escapeJsonString(token.appId) << "\""
+             << ",\"position\":" << view.position
+             << ",\"ahead\":" << view.ahead
+             << "}";
+
+  return jsonStream.str();
 }
 
-std::string snapshotJson(const Snapshot& s) {
-  std::ostringstream o;
-  o << "{\"ok\":true,\"fairness\":" << s.fairness << ",\"streak\":" << s.streak << ",\"lastSeq\":" << s.lastSeq
-    << ",\"priorityWaiting\":" << s.priorityWaiting << ",\"regularWaiting\":" << s.regularWaiting
-    << ",\"called\":" << s.called << ",\"serving\":" << s.serving << ",\"counters\":[";
-  for (std::size_t i = 0; i < s.counters.size(); ++i) {
-    const CounterView& c = s.counters[i];
-    if (i) o << ",";
-    o << "{\"id\":" << c.id << ",\"open\":" << (c.open ? "true" : "false") << ",\"token\":"
-      << (c.hasToken ? tokenJson(c.token) : "null") << "}";
-  }
-  o << "],\"waiting\":[";
-  for (std::size_t i = 0; i < s.waiting.size(); ++i) {
-    if (i) o << ",";
-    o << tokenJson(s.waiting[i]);
-  }
-  o << "]}";
-  return o.str();
-}
-
-std::string handleLine(QueueEngine& engine, const std::string& rawLine, bool& quit) {
-  std::istringstream in(rawLine);
-  std::vector<std::string> a;
-  for (std::string w; in >> w;) a.push_back(w);
-  if (a.empty()) return errorJson("BAD_COMMAND", "Empty command.");
-
-  const std::string& cmd = a[0];
-  long long n1 = 0, n2 = 0, n3 = 0, n4 = 0, n5 = 0;
-
-  if (cmd == "QUIT") { quit = true; return "{\"ok\":true}"; }
-
-  if (cmd == "RESET") {
-    if (a.size() != 2 || !toInt(a[1], n1) || n1 < 1 || n1 > 1000) return errorJson("BAD_ARGUMENT", "RESET <fairness 1-1000>");
-    engine.reset(static_cast<int>(n1));
-    return resultJson(engine, Result());
-  }
-  if (cmd == "COUNTER") {
-    if (a.size() != 3 || !toInt(a[1], n1) || !toInt(a[2], n2) || (n2 != 0 && n2 != 1)) return errorJson("BAD_ARGUMENT", "COUNTER <id> <0|1>");
-    return resultJson(engine, engine.setCounter(static_cast<int>(n1), n2 == 1));
-  }
-  if (cmd == "SEQ") {
-    if (a.size() != 2 || !toInt(a[1], n1) || n1 < 0) return errorJson("BAD_ARGUMENT", "SEQ <n>");
-    engine.setLastSeq(static_cast<int>(n1));
-    return resultJson(engine, Result());
-  }
-  if (cmd == "STREAK") {
-    if (a.size() != 2 || !toInt(a[1], n1) || n1 < 0) return errorJson("BAD_ARGUMENT", "STREAK <n>");
-    engine.setStreak(static_cast<int>(n1));
-    return resultJson(engine, Result());
-  }
-  if (cmd == "LOAD") {
-    Token t;
-    if (a.size() != 7 || !toInt(a[1], n1) || !toInt(a[2], n2) || !parseStatus(a[3], t.status) || !toInt(a[4], n3) || !toInt(a[5], n4)) {
-      return errorJson("BAD_ARGUMENT", "LOAD <seq> <level> <status> <counter> <studentId> <appId>");
+// Serializes Result into JSON
+string resultJson(const QueueEngine& engine, const Result& result) {
+  if (!result.ok) {
+    string errorResponse = "{\"ok\":false,\"error\":\"" + escapeJsonString(result.error) +
+                           "\",\"message\":\"" + escapeJsonString(result.message) + "\"";
+    if (result.hasToken) {
+      errorResponse += ",\"token\":" + tokenJson(result.token);
     }
-    t.seq = static_cast<int>(n1);
-    t.level = static_cast<int>(n2);
-    t.counterId = static_cast<int>(n3);
-    t.studentId = n4;
-    t.appId = a[6];
-    return resultJson(engine, engine.load(t));
+    errorResponse += "}";
+    return errorResponse;
   }
-  if (cmd == "ENQUEUE") {
-    if (a.size() != 4 || !toInt(a[1], n1) || !toInt(a[2], n2)) return errorJson("BAD_ARGUMENT", "ENQUEUE <level> <studentId> <appId>");
-    return resultJson(engine, engine.enqueue(static_cast<int>(n1), n2, a[3]));
+
+  string successResponse = "{\"ok\":true";
+  if (result.hasToken) {
+    successResponse += ",\"token\":" + tokenJson(result.token);
   }
-  if (cmd == "CALL") {
-    if (a.size() != 2 || !toInt(a[1], n1)) return errorJson("BAD_ARGUMENT", "CALL <counter>");
-    return resultJson(engine, engine.callNext(static_cast<int>(n1)));
+
+  successResponse += ",\"returned\":[";
+  for (size_t i = 0; i < result.returned.size(); i++) {
+    if (i > 0) {
+      successResponse += ",";
+    }
+    successResponse += tokenJson(result.returned[i]);
   }
-  if (cmd == "START" || cmd == "COMPLETE" || cmd == "NOSHOW" || cmd == "CANCEL" || cmd == "FIND_TOKEN" || cmd == "FIND_APP") {
-    if (a.size() != 2) return errorJson("BAD_ARGUMENT", cmd + " <value>");
-    Result r;
-    if (cmd == "START") r = engine.start(a[1]);
-    else if (cmd == "COMPLETE") r = engine.complete(a[1]);
-    else if (cmd == "NOSHOW") r = engine.noShow(a[1]);
-    else if (cmd == "CANCEL") r = engine.cancel(a[1]);
-    else if (cmd == "FIND_TOKEN") r = engine.findByCode(a[1]);
-    else r = engine.findByApplication(a[1]);
-    return resultJson(engine, r);
+  successResponse += "],\"streak\":" + to_string(engine.streak()) + "}";
+
+  return successResponse;
+}
+
+// Serializes Snapshot into JSON
+string snapshotJson(const Snapshot& snap) {
+  ostringstream jsonStream;
+
+  jsonStream << "{\"ok\":true"
+             << ",\"fairness\":" << snap.fairness
+             << ",\"streak\":" << snap.streak
+             << ",\"lastSeq\":" << snap.lastSeq
+             << ",\"priorityWaiting\":" << snap.priorityWaiting
+             << ",\"regularWaiting\":" << snap.regularWaiting
+             << ",\"called\":" << snap.called
+             << ",\"serving\":" << snap.serving
+             << ",\"counters\":[";
+
+  for (size_t i = 0; i < snap.counters.size(); i++) {
+    const CounterView& counter = snap.counters[i];
+    if (i > 0) {
+      jsonStream << ",";
+    }
+    jsonStream << "{\"id\":" << counter.id
+               << ",\"open\":" << (counter.open ? "true" : "false")
+               << ",\"token\":" << (counter.hasToken ? tokenJson(counter.token) : "null")
+               << "}";
   }
-  (void)n5;
-  if (cmd == "SNAPSHOT") return snapshotJson(engine.snapshot());
-  return errorJson("BAD_COMMAND", "Unknown command: " + cmd);
+
+  jsonStream << "],\"waiting\":[";
+  for (size_t i = 0; i < snap.waiting.size(); i++) {
+    if (i > 0) {
+      jsonStream << ",";
+    }
+    jsonStream << tokenJson(snap.waiting[i]);
+  }
+  jsonStream << "]}";
+
+  return jsonStream.str();
+}
+
+// Handles one line of command input for QueueEngine
+string handleLine(QueueEngine& engine, const string& rawLine, bool& quit) {
+  istringstream stream(rawLine);
+  vector<string> arguments;
+  for (string word; stream >> word;) {
+    arguments.push_back(word);
+  }
+
+  if (arguments.empty()) {
+    return buildErrorJson("BAD_COMMAND", "Empty command.");
+  }
+
+  const string& command = arguments[0];
+
+  if (command == "QUIT") {
+    quit = true;
+    return "{\"ok\":true}";
+  }
+
+  if (command == "RESET") {
+    long long fairnessBurst = 0;
+    if (arguments.size() != 2 || !parseInteger(arguments[1], fairnessBurst) ||
+        fairnessBurst < 1 || fairnessBurst > 1000) {
+      return buildErrorJson("BAD_ARGUMENT", "RESET <fairness 1-1000>");
+    }
+    engine.reset(static_cast<int>(fairnessBurst));
+    return resultJson(engine, Result());
+  }
+
+  if (command == "COUNTER") {
+    long long counterId = 0;
+    long long openFlag = 0;
+    if (arguments.size() != 3 || !parseInteger(arguments[1], counterId) ||
+        !parseInteger(arguments[2], openFlag) || (openFlag != 0 && openFlag != 1)) {
+      return buildErrorJson("BAD_ARGUMENT", "COUNTER <id> <0|1>");
+    }
+    return resultJson(engine, engine.setCounter(static_cast<int>(counterId), openFlag == 1));
+  }
+
+  if (command == "SEQ") {
+    long long lastSequence = 0;
+    if (arguments.size() != 2 || !parseInteger(arguments[1], lastSequence) || lastSequence < 0) {
+      return buildErrorJson("BAD_ARGUMENT", "SEQ <n>");
+    }
+    engine.setLastSeq(static_cast<int>(lastSequence));
+    return resultJson(engine, Result());
+  }
+
+  if (command == "STREAK") {
+    long long priorityStreak = 0;
+    if (arguments.size() != 2 || !parseInteger(arguments[1], priorityStreak) || priorityStreak < 0) {
+      return buildErrorJson("BAD_ARGUMENT", "STREAK <n>");
+    }
+    engine.setStreak(static_cast<int>(priorityStreak));
+    return resultJson(engine, Result());
+  }
+
+  if (command == "LOAD") {
+    Token restoredToken;
+    long long sequenceNumber = 0;
+    long long priorityLevel = 0;
+    long long counterId = 0;
+    long long studentId = 0;
+
+    if (arguments.size() != 7 ||
+        !parseInteger(arguments[1], sequenceNumber) ||
+        !parseInteger(arguments[2], priorityLevel) ||
+        !parseTokenStatus(arguments[3], restoredToken.status) ||
+        !parseInteger(arguments[4], counterId) ||
+        !parseInteger(arguments[5], studentId)) {
+      return buildErrorJson("BAD_ARGUMENT", "LOAD <seq> <level> <status> <counter> <studentId> <appId>");
+    }
+
+    restoredToken.seq = static_cast<int>(sequenceNumber);
+    restoredToken.level = static_cast<int>(priorityLevel);
+    restoredToken.counterId = static_cast<int>(counterId);
+    restoredToken.studentId = studentId;
+    restoredToken.appId = arguments[6];
+
+    return resultJson(engine, engine.load(restoredToken));
+  }
+
+  if (command == "ENQUEUE") {
+    long long priorityLevel = 0;
+    long long studentId = 0;
+
+    if (arguments.size() != 4 ||
+        !parseInteger(arguments[1], priorityLevel) ||
+        !parseInteger(arguments[2], studentId)) {
+      return buildErrorJson("BAD_ARGUMENT", "ENQUEUE <level> <studentId> <appId>");
+    }
+
+    const string& applicationId = arguments[3];
+    return resultJson(engine, engine.enqueue(static_cast<int>(priorityLevel), studentId, applicationId));
+  }
+
+  if (command == "CALL") {
+    long long counterId = 0;
+    if (arguments.size() != 2 || !parseInteger(arguments[1], counterId)) {
+      return buildErrorJson("BAD_ARGUMENT", "CALL <counter>");
+    }
+    return resultJson(engine, engine.callNext(static_cast<int>(counterId)));
+  }
+
+  if (command == "START" || command == "COMPLETE" ||
+      command == "NOSHOW" || command == "CANCEL" ||
+      command == "FIND_TOKEN" || command == "FIND_APP") {
+    if (arguments.size() != 2) {
+      return buildErrorJson("BAD_ARGUMENT", command + " <value>");
+    }
+
+    const string& value = arguments[1];
+    Result result;
+
+    if (command == "START") {
+      result = engine.start(value);
+    } else if (command == "COMPLETE") {
+      result = engine.complete(value);
+    } else if (command == "NOSHOW") {
+      result = engine.noShow(value);
+    } else if (command == "CANCEL") {
+      result = engine.cancel(value);
+    } else if (command == "FIND_TOKEN") {
+      result = engine.findByCode(value);
+    } else {
+      result = engine.findByApplication(value);
+    }
+
+    return resultJson(engine, result);
+  }
+
+  if (command == "SNAPSHOT") {
+    return snapshotJson(engine.snapshot());
+  }
+
+  return buildErrorJson("BAD_COMMAND", "Unknown command: " + command);
 }
 
 }  // namespace admitflow

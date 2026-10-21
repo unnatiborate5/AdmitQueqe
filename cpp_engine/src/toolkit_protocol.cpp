@@ -1,8 +1,22 @@
+// AdmitFlow Toolkit Protocol Implementation
+//
+// Implements the text protocol handlers for Phase 5 DSA Syllabus Features:
+// 1. Searching (Binary Search over Application IDs/Tokens, Linear Search over Names)
+// 2. Sorting (Merge Sort for Admin Worklist Planner)
+// 3. Stack (LIFO Undo Stack per Admin for reversible actions)
+// 4. Sparse Matrix (Appointment Load Grid: Days x Time Slots)
+// 5. Dense Matrix (Document Readiness Grid: Documents x CAP Rounds)
+// 6. Max-Heap Priority Queue (Admission Progress Queue with FIFO tie-breaking)
+//
+// Any non-toolkit command is transparently forwarded to the Phase 4 Queue Engine.
+
 #include "toolkit.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "planner.hpp"
@@ -13,295 +27,662 @@ namespace admitflow {
 
 namespace {
 
-std::vector<std::string> splitOn(const std::string& s, char sep) {
-  std::vector<std::string> out;
-  std::string cur;
-  for (char c : s) { if (c == sep) { out.push_back(cur); cur.clear(); } else cur += c; }
-  out.push_back(cur);
-  return out;
+// Splits a string by delimiter character
+std::vector<std::string> splitString(const std::string& input, char delimiter) {
+  std::vector<std::string> tokens;
+  std::string currentSegment;
+  for (char ch : input) {
+    if (ch == delimiter) {
+      tokens.push_back(currentSegment);
+      currentSegment.clear();
+    } else {
+      currentSegment += ch;
+    }
+  }
+  tokens.push_back(currentSegment);
+  return tokens;
 }
 
-bool toInt(const std::string& s, long long& out) {
-  if (s.empty()) return false;
-  char* end = nullptr;
-  long long v = std::strtoll(s.c_str(), &end, 10);
-  if (end == s.c_str() || *end != '\0') return false;
-  out = v;
-  return true;
-}
-
-bool toDouble(const std::string& s, double& out) {
-  if (s.empty()) return false;
-  char* end = nullptr;
-  double v = std::strtod(s.c_str(), &end);
-  if (end == s.c_str() || *end != '\0') return false;
-  out = v;
-  return true;
-}
-
-std::string decodeName(std::string s) { for (char& c : s) if (c == '~') c = ' '; return s; }
-
-std::string err(const std::string& code, const std::string& message) {
-  return "{\"ok\":false,\"error\":\"" + jsonEscape(code) + "\",\"message\":\"" + jsonEscape(message) + "\"}";
-}
-
-std::string idList(const std::vector<long long>& ids) {
-  std::string out = "[";
-  for (std::size_t i = 0; i < ids.size(); ++i) { if (i) out += ","; out += std::to_string(ids[i]); }
-  return out + "]";
-}
-
-std::string statsJson(const SearchStats& s) {
-  return "\"algorithm\":\"" + s.algorithm + "\",\"comparisons\":" + std::to_string(s.comparisons) + ",\"size\":" + std::to_string(s.size);
-}
-
-std::string entryJson(const UndoEntry& e) {
-  return "{\"actionId\":" + std::to_string(e.actionId) + ",\"studentId\":" + std::to_string(e.studentId) + ",\"kind\":\"" + jsonEscape(e.kind) + "\"}";
-}
-
-template <typename T, typename F>
-std::string arrayJson(const std::vector<T>& v, F fmt) {
-  std::string out = "[";
-  for (std::size_t i = 0; i < v.size(); ++i) { if (i) out += ","; out += fmt(v[i]); }
-  return out + "]";
-}
-
-const std::size_t MAX_ITEMS = 20000;
-
-// Checks "<cmd> ... <n> item1 ... itemN": returns false with a ready error reply when malformed.
-bool itemsAt(const std::vector<std::string>& a, std::size_t countAt, std::vector<std::string>& items, std::string& error) {
-  long long n = 0;
-  if (a.size() <= countAt || !toInt(a[countAt], n) || n < 0 || static_cast<std::size_t>(n) > MAX_ITEMS || a.size() != countAt + 1 + static_cast<std::size_t>(n)) {
-    error = err("BAD_ARGUMENT", "Item count does not match the items given.");
+// Parses 64-bit integer from string
+bool parseLongLong(const std::string& str, long long& result) {
+  if (str.empty()) {
     return false;
   }
-  items.assign(a.begin() + static_cast<std::ptrdiff_t>(countAt) + 1, a.end());
+  char* endPointer = nullptr;
+  long long value = std::strtoll(str.c_str(), &endPointer, 10);
+  if (endPointer == str.c_str() || *endPointer != '\0') {
+    return false;
+  }
+  result = value;
   return true;
+}
+
+// Parses floating-point double from string
+bool parseDouble(const std::string& str, double& result) {
+  if (str.empty()) {
+    return false;
+  }
+  char* endPointer = nullptr;
+  double value = std::strtod(str.c_str(), &endPointer);
+  if (endPointer == str.c_str() || *endPointer != '\0') {
+    return false;
+  }
+  result = value;
+  return true;
+}
+
+// Replaces tilde characters '~' with spaces in student names
+std::string decodeSpaces(std::string text) {
+  for (char& ch : text) {
+    if (ch == '~') {
+      ch = ' ';
+    }
+  }
+  return text;
+}
+
+// Creates standard JSON error response
+std::string makeError(const std::string& errorCode, const std::string& errorMessage) {
+  return "{\"ok\":false,\"error\":\"" + jsonEscape(errorCode) +
+         "\",\"message\":\"" + jsonEscape(errorMessage) + "\"}";
+}
+
+// Serializes a vector of IDs into a JSON array: [1,2,3]
+std::string formatIdList(const std::vector<long long>& ids) {
+  std::string json = "[";
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    if (i > 0) {
+      json += ",";
+    }
+    json += std::to_string(ids[i]);
+  }
+  json += "]";
+  return json;
+}
+
+// Serializes search algorithm metrics into JSON fragment
+std::string formatSearchStats(const SearchStats& stats) {
+  return "\"algorithm\":\"" + stats.algorithm +
+         "\",\"comparisons\":" + std::to_string(stats.comparisons) +
+         ",\"size\":" + std::to_string(stats.size);
+}
+
+// Serializes an UndoEntry struct into JSON
+std::string formatUndoEntry(const UndoEntry& entry) {
+  return "{\"actionId\":" + std::to_string(entry.actionId) +
+         ",\"studentId\":" + std::to_string(entry.studentId) +
+         ",\"kind\":\"" + jsonEscape(entry.kind) + "\"}";
+}
+
+// Generic helper to serialize a vector of items with a custom formatting function
+template <typename T, typename Formatter>
+std::string formatArray(const std::vector<T>& items, Formatter formatFn) {
+  std::string json = "[";
+  for (std::size_t i = 0; i < items.size(); ++i) {
+    if (i > 0) {
+      json += ",";
+    }
+    json += formatFn(items[i]);
+  }
+  json += "]";
+  return json;
+}
+
+const std::size_t MAX_ALLOWED_ITEMS = 20000;
+
+// Validates and extracts a batch list of items starting at index `countIndex`:
+// Format: <cmd> ... <itemCount> item1 item2 ... itemN
+bool extractItems(const std::vector<std::string>& arguments, std::size_t countIndex,
+                  std::vector<std::string>& extractedItems, std::string& errorMessage) {
+  long long count = 0;
+  if (arguments.size() <= countIndex ||
+      !parseLongLong(arguments[countIndex], count) ||
+      count < 0 ||
+      static_cast<std::size_t>(count) > MAX_ALLOWED_ITEMS ||
+      arguments.size() != countIndex + 1 + static_cast<std::size_t>(count)) {
+    errorMessage = makeError("BAD_ARGUMENT", "Item count does not match the items given.");
+    return false;
+  }
+  extractedItems.assign(arguments.begin() + static_cast<std::ptrdiff_t>(countIndex) + 1,
+                        arguments.end());
+  return true;
+}
+
+// -----------------------------------------------------------------------------
+// Subsystem 1: Search Index Commands
+// -----------------------------------------------------------------------------
+
+std::string handleSearchIndexCommands(Toolkit& tk, const std::string& command,
+                                      const std::vector<std::string>& arguments) {
+  if (command == "INDEX_CLEAR") {
+    tk.index.clear();
+    return "{\"ok\":true}";
+  }
+
+  if (command == "INDEX_ADD") {
+    std::string errorMessage;
+    std::vector<std::string> rawItems;
+    if (!extractItems(arguments, 1, rawItems, errorMessage)) {
+      return errorMessage;
+    }
+
+    for (const std::string& itemStr : rawItems) {
+      std::vector<std::string> fields = splitString(itemStr, ':');
+      long long studentId = 0;
+      if (fields.size() != 3 || !parseLongLong(fields[0], studentId) || fields[1].empty()) {
+        return makeError("BAD_ARGUMENT", "INDEX_ADD item: id:APPID:name");
+      }
+      tk.index.addStudent(studentId, fields[1], decodeSpaces(fields[2]));
+    }
+    return "{\"ok\":true,\"added\":" + std::to_string(rawItems.size()) + "}";
+  }
+
+  if (command == "INDEX_TOKENS") {
+    std::string errorMessage;
+    std::vector<std::string> rawItems;
+    if (!extractItems(arguments, 1, rawItems, errorMessage)) {
+      return errorMessage;
+    }
+
+    for (const std::string& itemStr : rawItems) {
+      std::vector<std::string> fields = splitString(itemStr, ':');
+      long long tokenNumber = 0;
+      long long studentId = 0;
+      if (fields.size() != 3 || !parseLongLong(fields[0], tokenNumber) ||
+          fields[1].size() != 1 || !parseLongLong(fields[2], studentId)) {
+        return makeError("BAD_ARGUMENT", "INDEX_TOKENS item: number:lane:studentId");
+      }
+      tk.index.addToken(static_cast<int>(tokenNumber), fields[1][0], studentId);
+    }
+    return "{\"ok\":true,\"added\":" + std::to_string(rawItems.size()) + "}";
+  }
+
+  if (command == "INDEX_BUILD") {
+    std::size_t comparisons = tk.index.build();
+    return "{\"ok\":true,\"students\":" + std::to_string(tk.index.students()) +
+           ",\"tokens\":" + std::to_string(tk.index.tokens()) +
+           ",\"algorithm\":\"merge sort\",\"comparisons\":" + std::to_string(comparisons) + "}";
+  }
+
+  if (command == "SEARCH_APP" || command == "SEARCH_TOKEN" || command == "SEARCH_NAME") {
+    if (arguments.size() != 2) {
+      return makeError("BAD_ARGUMENT", command + " <value>");
+    }
+    if (!tk.index.built()) {
+      return makeError("NOT_BUILT", "The search index has not been built.");
+    }
+
+    SearchStats stats;
+
+    if (command == "SEARCH_APP") {
+      std::vector<long long> matches = tk.index.findByApplicationPrefix(arguments[1], stats);
+      return "{\"ok\":true," + formatSearchStats(stats) + ",\"matches\":" + formatIdList(matches) + "}";
+    }
+    if (command == "SEARCH_TOKEN") {
+      long long studentId = 0;
+      bool found = tk.index.findToken(arguments[1], studentId, stats);
+      std::vector<long long> matches = found ? std::vector<long long>{studentId} : std::vector<long long>{};
+      return "{\"ok\":true," + formatSearchStats(stats) + ",\"matches\":" + formatIdList(matches) + "}";
+    }
+    if (command == "SEARCH_NAME") {
+      std::vector<long long> matches = tk.index.findByName(decodeSpaces(arguments[1]), stats);
+      return "{\"ok\":true," + formatSearchStats(stats) + ",\"matches\":" + formatIdList(matches) + "}";
+    }
+  }
+
+  return "";
+}
+
+// -----------------------------------------------------------------------------
+// Subsystem 2: Sorting (Merge Sort Planner)
+// -----------------------------------------------------------------------------
+
+std::string handleSortCommand(Toolkit& tk, const std::vector<std::string>& arguments) {
+  (void)tk;
+  SortMode sortMode;
+  if (arguments.size() < 3 || !parseSortMode(arguments[1], sortMode)) {
+    return makeError("BAD_ARGUMENT",
+                     "SORT <unscheduled|arrivals_time|arrivals_priority|arrivals_token> <n> items");
+  }
+
+  std::string errorMessage;
+  std::vector<std::string> rawItems;
+  if (!extractItems(arguments, 2, rawItems, errorMessage)) {
+    return errorMessage;
+  }
+
+  std::vector<WorkItem> worklist;
+  for (const std::string& itemStr : rawItems) {
+    std::vector<std::string> fields = splitString(itemStr, ':');
+    long long studentId = 0;
+    long long priorityLevel = 0;
+    long long minutesAfterMidnight = 0;
+    long long tokenNumber = 0;
+    long long waitKeyTimestamp = 0;
+
+    if (fields.size() != 6 ||
+        !parseLongLong(fields[0], studentId) ||
+        !parseLongLong(fields[1], priorityLevel) ||
+        !parseLongLong(fields[2], minutesAfterMidnight) ||
+        !parseLongLong(fields[3], tokenNumber) ||
+        !parseLongLong(fields[4], waitKeyTimestamp)) {
+      return makeError("BAD_ARGUMENT", "SORT item: id:level:minutes:token:waitKey:name");
+    }
+
+    WorkItem item;
+    item.id = studentId;
+    item.level = static_cast<int>(priorityLevel);
+    item.minutes = static_cast<int>(minutesAfterMidnight);
+    item.token = static_cast<int>(tokenNumber);
+    item.waitKey = waitKeyTimestamp;
+    item.name = SearchIndex::lower(decodeSpaces(fields[5]));
+    worklist.push_back(item);
+  }
+
+  std::size_t comparisons = sortWork(worklist, sortMode);
+
+  std::vector<long long> sortedIds;
+  for (const WorkItem& item : worklist) {
+    sortedIds.push_back(item.id);
+  }
+
+  return "{\"ok\":true,\"algorithm\":\"merge sort\",\"comparisons\":" + std::to_string(comparisons) +
+         ",\"size\":" + std::to_string(worklist.size()) +
+         ",\"order\":" + formatIdList(sortedIds) + "}";
+}
+
+// -----------------------------------------------------------------------------
+// Subsystem 3: Stack (Undo per Admin)
+// -----------------------------------------------------------------------------
+
+std::string handleStackCommand(Toolkit& tk, const std::string& command,
+                               const std::vector<std::string>& arguments) {
+  if (command == "STACK_PUSH") {
+    long long adminId = 0;
+    long long actionId = 0;
+    long long studentId = 0;
+
+    if (arguments.size() != 5 ||
+        !parseLongLong(arguments[1], adminId) ||
+        !parseLongLong(arguments[2], actionId) ||
+        !parseLongLong(arguments[3], studentId) ||
+        arguments[4].empty()) {
+      return makeError("BAD_ARGUMENT", "STACK_PUSH <admin> <actionId> <studentId> <kind>");
+    }
+
+    UndoEntry newEntry;
+    newEntry.actionId = actionId;
+    newEntry.studentId = studentId;
+    newEntry.kind = arguments[4];
+
+    UndoEntry droppedEntry;
+    bool hadDropped = tk.undo.push(adminId, newEntry, &droppedEntry);
+
+    return "{\"ok\":true,\"size\":" + std::to_string(tk.undo.size(adminId)) +
+           ",\"dropped\":" + std::to_string(hadDropped ? droppedEntry.actionId : 0) + "}";
+  }
+
+  if (command == "STACK_POP" || command == "STACK_PEEK" || command == "STACK_LIST") {
+    long long adminId = 0;
+    if (arguments.size() != 2 || !parseLongLong(arguments[1], adminId)) {
+      return makeError("BAD_ARGUMENT", command + " <admin>");
+    }
+
+    if (command == "STACK_LIST") {
+      std::vector<UndoEntry> entries = tk.undo.list(adminId);
+      return "{\"ok\":true,\"size\":" + std::to_string(tk.undo.size(adminId)) +
+             ",\"entries\":" + formatArray(entries, formatUndoEntry) + "}";
+    }
+
+    if (command == "STACK_PEEK") {
+      const UndoEntry* top = tk.undo.peek(adminId);
+      if (top == nullptr) {
+        return makeError("EMPTY", "Nothing to undo.");
+      }
+      return "{\"ok\":true,\"size\":" + std::to_string(tk.undo.size(adminId)) +
+             ",\"entry\":" + formatUndoEntry(*top) + "}";
+    }
+
+    // STACK_POP
+    UndoEntry poppedEntry;
+    if (!tk.undo.pop(adminId, poppedEntry)) {
+      return makeError("EMPTY", "Nothing to undo.");
+    }
+    return "{\"ok\":true,\"size\":" + std::to_string(tk.undo.size(adminId)) +
+           ",\"entry\":" + formatUndoEntry(poppedEntry) + "}";
+  }
+
+  if (command == "STACK_CLEAR_ALL") {
+    tk.undo.clearAll();
+    return "{\"ok\":true}";
+  }
+
+  return "";
+}
+
+// -----------------------------------------------------------------------------
+// Subsystem 4: Sparse Matrix Report (Appointment Load)
+// -----------------------------------------------------------------------------
+
+std::string handleApptLoadCommand(Toolkit& tk, const std::vector<std::string>& arguments) {
+  (void)tk;
+  long long totalDays = 0;
+  long long totalSlots = 0;
+  long long fromSlot = 0;
+  long long toSlot = 0;
+
+  if (arguments.size() < 6 ||
+      !parseLongLong(arguments[1], totalDays) ||
+      !parseLongLong(arguments[2], totalSlots) ||
+      !parseLongLong(arguments[3], fromSlot) ||
+      !parseLongLong(arguments[4], toSlot) ||
+      totalDays > 400 || totalSlots > 400) {
+    return makeError("BAD_ARGUMENT", "APPT_LOAD <rows> <cols> <fromCol> <toCol> <n> day:slot ...");
+  }
+
+  std::string errorMessage;
+  std::vector<std::string> rawItems;
+  if (!extractItems(arguments, 5, rawItems, errorMessage)) {
+    return errorMessage;
+  }
+
+  std::vector<std::pair<int, int>> bookings;
+  for (const std::string& itemStr : rawItems) {
+    std::vector<std::string> fields = splitString(itemStr, ':');
+    long long day = 0;
+    long long slot = 0;
+    if (fields.size() != 2 || !parseLongLong(fields[0], day) || !parseLongLong(fields[1], slot)) {
+      return makeError("BAD_ARGUMENT", "APPT_LOAD item: day:slot");
+    }
+    bookings.push_back({static_cast<int>(day), static_cast<int>(slot)});
+  }
+
+  LoadReport report;
+  if (!computeAppointmentLoad(static_cast<int>(totalDays), static_cast<int>(totalSlots),
+                              static_cast<int>(fromSlot), static_cast<int>(toSlot),
+                              bookings, report)) {
+    return makeError("BAD_ARGUMENT", "Booking outside the grid or bad range.");
+  }
+
+  auto formatCell = [](const LoadCell& cell) {
+    return "[" + std::to_string(cell.row) + "," + std::to_string(cell.col) + "," +
+           std::to_string(cell.count) + "]";
+  };
+
+  auto formatNumber = [](int value) {
+    return std::to_string(value);
+  };
+
+  auto formatBestSlot = [](const BestSlot& best) {
+    return "[" + std::to_string(best.col) + "," + std::to_string(best.count) + "]";
+  };
+
+  std::ostringstream jsonStream;
+  jsonStream << "{\"ok\":true"
+             << ",\"rows\":" << report.rows
+             << ",\"cols\":" << report.cols
+             << ",\"nonZeros\":" << report.nonZeros
+             << ",\"density\":" << report.density
+             << ",\"bookings\":" << bookings.size()
+             << ",\"cells\":" << formatArray(report.cells, formatCell)
+             << ",\"rowSums\":" << formatArray(report.rowSums, formatNumber)
+             << ",\"colSums\":" << formatArray(report.colSums, formatNumber)
+             << ",\"busiest\":" << formatArray(report.busiest, formatCell)
+             << ",\"bestSlots\":" << formatArray(report.bestSlots, formatBestSlot)
+             << ",\"lookupComparisons\":" << report.lookupComparisons
+             << "}";
+
+  return jsonStream.str();
+}
+
+// -----------------------------------------------------------------------------
+// Subsystem 5: Dense Matrix Report (Document Readiness)
+// -----------------------------------------------------------------------------
+
+std::string handleDocReadinessCommand(Toolkit& tk, const std::vector<std::string>& arguments) {
+  (void)tk;
+  long long totalDocuments = 0;
+  long long totalRounds = 0;
+
+  if (arguments.size() < 3 ||
+      !parseLongLong(arguments[1], totalDocuments) ||
+      !parseLongLong(arguments[2], totalRounds) ||
+      totalDocuments < 1 || totalRounds < 1 ||
+      totalDocuments > 100 || totalRounds > 100) {
+    return makeError("BAD_ARGUMENT",
+                     "DOC_READINESS <docs> <rounds> <roundTotal...> <n> doc:round:count ...");
+  }
+
+  std::size_t countIndex = 3 + static_cast<std::size_t>(totalRounds);
+  std::vector<int> roundTotals;
+
+  for (long long r = 0; r < totalRounds; ++r) {
+    long long roundTotal = 0;
+    if (arguments.size() <= 3 + static_cast<std::size_t>(r) ||
+        !parseLongLong(arguments[3 + static_cast<std::size_t>(r)], roundTotal) ||
+        roundTotal < 0) {
+      return makeError("BAD_ARGUMENT", "Bad round total.");
+    }
+    roundTotals.push_back(static_cast<int>(roundTotal));
+  }
+
+  std::string errorMessage;
+  std::vector<std::string> rawItems;
+  if (!extractItems(arguments, countIndex, rawItems, errorMessage)) {
+    return errorMessage;
+  }
+
+  std::vector<DocCount> cellCounts;
+  for (const std::string& itemStr : rawItems) {
+    std::vector<std::string> fields = splitString(itemStr, ':');
+    long long docId = 0;
+    long long roundId = 0;
+    long long count = 0;
+    if (fields.size() != 3 ||
+        !parseLongLong(fields[0], docId) ||
+        !parseLongLong(fields[1], roundId) ||
+        !parseLongLong(fields[2], count)) {
+      return makeError("BAD_ARGUMENT", "DOC_READINESS item: doc:round:count");
+    }
+    cellCounts.push_back(DocCount{static_cast<int>(docId), static_cast<int>(roundId),
+                                  static_cast<int>(count)});
+  }
+
+  ReadinessReport report;
+  if (!computeDocReadiness(static_cast<int>(totalDocuments), static_cast<int>(totalRounds),
+                           roundTotals, cellCounts, report)) {
+    return makeError("BAD_ARGUMENT", "Invalid matrix data.");
+  }
+
+  auto formatNumber = [](int value) {
+    return std::to_string(value);
+  };
+
+  auto formatPercent = [](double value) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%.1f", value);
+    return std::string(buffer);
+  };
+
+  std::ostringstream jsonStream;
+  jsonStream << "{\"ok\":true"
+             << ",\"docs\":" << report.docs
+             << ",\"rounds\":" << report.rounds
+             << ",\"counts\":" << formatArray(report.counts, formatNumber)
+             << ",\"percent\":" << formatArray(report.percent, formatPercent)
+             << ",\"docTotals\":" << formatArray(report.docTotals, formatNumber)
+             << ",\"roundTotals\":" << formatArray(report.roundTotals, formatNumber)
+             << ",\"weakestDoc\":" << formatArray(report.weakestDoc, formatNumber)
+             << ",\"strongestDoc\":" << formatArray(report.strongestDoc, formatNumber)
+             << "}";
+
+  return jsonStream.str();
+}
+
+// -----------------------------------------------------------------------------
+// Subsystem 6: Admission Progress Queue (Max-Heap)
+// -----------------------------------------------------------------------------
+
+std::string handleProgressHeapCommands(Toolkit& tk, const std::string& command,
+                                       const std::vector<std::string>& arguments) {
+  if (command == "PROGRESS_CLEAR") {
+    tk.progress.clear();
+    return "{\"ok\":true}";
+  }
+
+  if (command == "PROGRESS_UPSERT") {
+    long long studentId = 0;
+    if (arguments.size() != 5 || !parseLongLong(arguments[1], studentId) || arguments[2].empty()) {
+      return makeError("BAD_ARGUMENT", "PROGRESS_UPSERT <studentId> <token> <score> <enteredAt>");
+    }
+
+    double priorityScore = 0.0;
+    if (!parseDouble(arguments[3], priorityScore)) {
+      return makeError("BAD_ARGUMENT", "Invalid score value.");
+    }
+
+    tk.progress.upsert(studentId, arguments[2], priorityScore, decodeSpaces(arguments[4]));
+    return "{\"ok\":true,\"studentId\":" + std::to_string(studentId) +
+           ",\"size\":" + std::to_string(tk.progress.size()) + "}";
+  }
+
+  if (command == "PROGRESS_REMOVE") {
+    long long studentId = 0;
+    if (arguments.size() != 2 || !parseLongLong(arguments[1], studentId)) {
+      return makeError("BAD_ARGUMENT", "PROGRESS_REMOVE <studentId>");
+    }
+
+    bool wasRemoved = tk.progress.remove(studentId);
+    return "{\"ok\":true,\"studentId\":" + std::to_string(studentId) +
+           ",\"removed\":" + (wasRemoved ? "true" : "false") +
+           ",\"size\":" + std::to_string(tk.progress.size()) + "}";
+  }
+
+  if (command == "PROGRESS_LOAD") {
+    std::string errorMessage;
+    std::vector<std::string> rawItems;
+    if (!extractItems(arguments, 1, rawItems, errorMessage)) {
+      return errorMessage;
+    }
+
+    for (const std::string& itemStr : rawItems) {
+      std::vector<std::string> fields = splitString(itemStr, '|');
+      long long studentId = 0;
+      if (fields.size() != 4 || !parseLongLong(fields[0], studentId) || fields[1].empty()) {
+        return makeError("BAD_ARGUMENT", "PROGRESS_LOAD item: studentId|token|score|enteredAt");
+      }
+
+      double priorityScore = 0.0;
+      if (!parseDouble(fields[2], priorityScore)) {
+        return makeError("BAD_ARGUMENT", "Invalid score in PROGRESS_LOAD item.");
+      }
+
+      tk.progress.upsert(studentId, fields[1], priorityScore, decodeSpaces(fields[3]));
+    }
+
+    return "{\"ok\":true,\"loaded\":" + std::to_string(rawItems.size()) +
+           ",\"size\":" + std::to_string(tk.progress.size()) + "}";
+  }
+
+  if (command == "PROGRESS_PEEK") {
+    const ProgressStudent* topStudent = tk.progress.peek();
+    if (topStudent == nullptr) {
+      return "{\"ok\":true,\"hasStudent\":false}";
+    }
+
+    char scoreBuffer[32];
+    std::snprintf(scoreBuffer, sizeof(scoreBuffer), "%.4f", topStudent->score);
+
+    return "{\"ok\":true,\"hasStudent\":true,\"student\":{\"studentId\":" +
+           std::to_string(topStudent->studentId) +
+           ",\"token\":\"" + jsonEscape(topStudent->token) + "\"" +
+           ",\"score\":" + scoreBuffer +
+           ",\"enteredAt\":\"" + jsonEscape(topStudent->enteredAt) + "\"}}";
+  }
+
+  if (command == "PROGRESS_SIZE") {
+    return "{\"ok\":true,\"size\":" + std::to_string(tk.progress.size()) + "}";
+  }
+
+  if (command == "PROGRESS_RANK") {
+    std::vector<ProgressStudent> rankedStudents = tk.progress.getRanked();
+    std::ostringstream jsonStream;
+    jsonStream << "{\"ok\":true,\"size\":" << rankedStudents.size() << ",\"ranked\":[";
+
+    for (std::size_t i = 0; i < rankedStudents.size(); ++i) {
+      if (i > 0) {
+        jsonStream << ",";
+      }
+      char scoreBuffer[32];
+      std::snprintf(scoreBuffer, sizeof(scoreBuffer), "%.4f", rankedStudents[i].score);
+
+      jsonStream << "{\"position\":" << (i + 1)
+                 << ",\"studentId\":" << rankedStudents[i].studentId
+                 << ",\"token\":\"" << jsonEscape(rankedStudents[i].token) << "\""
+                 << ",\"score\":" << scoreBuffer
+                 << ",\"enteredAt\":\"" << jsonEscape(rankedStudents[i].enteredAt) << "\"}";
+    }
+
+    jsonStream << "]}";
+    return jsonStream.str();
+  }
+
+  return "";
 }
 
 }  // namespace
 
+// Central Dispatcher: Routes incoming commands to respective subsystems
 std::string handleToolkitLine(Toolkit& tk, const std::string& line, bool& quit) {
-  std::istringstream in(line);
-  std::vector<std::string> a;
-  for (std::string w; in >> w;) a.push_back(w);
-  if (a.empty()) return handleLine(tk.queue, line, quit);
-  const std::string& cmd = a[0];
-  long long n1 = 0, n2 = 0, n3 = 0;
-  std::string error;
-  std::vector<std::string> items;
-
-  // ------------------------------------------------------------------ searching
-  if (cmd == "INDEX_CLEAR") { tk.index.clear(); return "{\"ok\":true}"; }
-
-  if (cmd == "INDEX_ADD") {
-    if (!itemsAt(a, 1, items, error)) return error;
-    for (const std::string& it : items) {
-      std::vector<std::string> f = splitOn(it, ':');
-      if (f.size() != 3 || !toInt(f[0], n1) || f[1].empty()) return err("BAD_ARGUMENT", "INDEX_ADD item: id:APPID:name");
-      tk.index.addStudent(n1, f[1], decodeName(f[2]));
-    }
-    return "{\"ok\":true,\"added\":" + std::to_string(items.size()) + "}";
-  }
-  if (cmd == "INDEX_TOKENS") {
-    if (!itemsAt(a, 1, items, error)) return error;
-    for (const std::string& it : items) {
-      std::vector<std::string> f = splitOn(it, ':');
-      if (f.size() != 3 || !toInt(f[0], n1) || f[1].size() != 1 || !toInt(f[2], n2)) return err("BAD_ARGUMENT", "INDEX_TOKENS item: number:lane:studentId");
-      tk.index.addToken(static_cast<int>(n1), f[1][0], n2);
-    }
-    return "{\"ok\":true,\"added\":" + std::to_string(items.size()) + "}";
-  }
-  if (cmd == "INDEX_BUILD") {
-    const std::size_t cmp = tk.index.build();
-    return "{\"ok\":true,\"students\":" + std::to_string(tk.index.students()) + ",\"tokens\":" + std::to_string(tk.index.tokens()) +
-           ",\"algorithm\":\"merge sort\",\"comparisons\":" + std::to_string(cmp) + "}";
-  }
-  if (cmd == "SEARCH_APP" || cmd == "SEARCH_TOKEN" || cmd == "SEARCH_NAME") {
-    if (a.size() != 2) return err("BAD_ARGUMENT", cmd + " <value>");
-    if (!tk.index.built()) return err("NOT_BUILT", "The search index has not been built.");
-    SearchStats st;
-    if (cmd == "SEARCH_APP") {
-      std::vector<long long> ids = tk.index.findByApplicationPrefix(a[1], st);
-      return "{\"ok\":true," + statsJson(st) + ",\"matches\":" + idList(ids) + "}";
-    }
-    if (cmd == "SEARCH_TOKEN") {
-      long long id = 0;
-      bool found = tk.index.findToken(a[1], id, st);
-      return "{\"ok\":true," + statsJson(st) + ",\"matches\":" + idList(found ? std::vector<long long>{id} : std::vector<long long>{}) + "}";
-    }
-    std::vector<long long> ids = tk.index.findByName(decodeName(a[1]), st);
-    return "{\"ok\":true," + statsJson(st) + ",\"matches\":" + idList(ids) + "}";
+  std::istringstream stream(line);
+  std::vector<std::string> arguments;
+  for (std::string word; stream >> word;) {
+    arguments.push_back(word);
   }
 
-  // ------------------------------------------------------------------ sorting
-  if (cmd == "SORT") {
-    SortMode mode;
-    if (a.size() < 3 || !parseSortMode(a[1], mode)) return err("BAD_ARGUMENT", "SORT <unscheduled|arrivals_time|arrivals_priority|arrivals_token> <n> items");
-    if (!itemsAt(a, 2, items, error)) return error;
-    std::vector<WorkItem> work;
-    for (const std::string& it : items) {
-      std::vector<std::string> f = splitOn(it, ':');
-      long long id, level, minutes, token, wait;
-      if (f.size() != 6 || !toInt(f[0], id) || !toInt(f[1], level) || !toInt(f[2], minutes) || !toInt(f[3], token) || !toInt(f[4], wait)) {
-        return err("BAD_ARGUMENT", "SORT item: id:level:minutes:token:waitKey:name");
-      }
-      WorkItem w;
-      w.id = id; w.level = static_cast<int>(level); w.minutes = static_cast<int>(minutes); w.token = static_cast<int>(token); w.waitKey = wait;
-      w.name = SearchIndex::lower(decodeName(f[5]));
-      work.push_back(w);
-    }
-    const std::size_t cmp = sortWork(work, mode);
-    std::vector<long long> ids;
-    for (const WorkItem& w : work) ids.push_back(w.id);
-    return "{\"ok\":true,\"algorithm\":\"merge sort\",\"comparisons\":" + std::to_string(cmp) + ",\"size\":" + std::to_string(work.size()) + ",\"order\":" + idList(ids) + "}";
+  if (arguments.empty()) {
+    // Forward empty line to queue protocol handler
+    return handleLine(tk.queue, line, quit);
   }
 
-  // ------------------------------------------------------------------ stack (undo)
-  if (cmd == "STACK_PUSH") {
-    if (a.size() != 5 || !toInt(a[1], n1) || !toInt(a[2], n2) || !toInt(a[3], n3) || a[4].empty()) return err("BAD_ARGUMENT", "STACK_PUSH <admin> <actionId> <studentId> <kind>");
-    UndoEntry e; e.actionId = n2; e.studentId = n3; e.kind = a[4];
-    UndoEntry dropped;
-    const bool did = tk.undo.push(n1, e, &dropped);
-    return "{\"ok\":true,\"size\":" + std::to_string(tk.undo.size(n1)) + ",\"dropped\":" + std::to_string(did ? dropped.actionId : 0) + "}";
-  }
-  if (cmd == "STACK_POP" || cmd == "STACK_PEEK" || cmd == "STACK_LIST") {
-    if (a.size() != 2 || !toInt(a[1], n1)) return err("BAD_ARGUMENT", cmd + " <admin>");
-    if (cmd == "STACK_LIST") return "{\"ok\":true,\"size\":" + std::to_string(tk.undo.size(n1)) + ",\"entries\":" + arrayJson(tk.undo.list(n1), entryJson) + "}";
-    UndoEntry e;
-    if (cmd == "STACK_PEEK") {
-      const UndoEntry* top = tk.undo.peek(n1);
-      if (top == nullptr) return err("EMPTY", "Nothing to undo.");
-      return "{\"ok\":true,\"size\":" + std::to_string(tk.undo.size(n1)) + ",\"entry\":" + entryJson(*top) + "}";
-    }
-    if (!tk.undo.pop(n1, e)) return err("EMPTY", "Nothing to undo.");
-    return "{\"ok\":true,\"size\":" + std::to_string(tk.undo.size(n1)) + ",\"entry\":" + entryJson(e) + "}";
-  }
-  if (cmd == "STACK_CLEAR_ALL") { tk.undo.clearAll(); return "{\"ok\":true}"; }
+  const std::string& command = arguments[0];
 
-  // ------------------------------------------------------------------ matrices
-  if (cmd == "APPT_LOAD") {
-    long long rows, cols, from, to;
-    if (a.size() < 6 || !toInt(a[1], rows) || !toInt(a[2], cols) || !toInt(a[3], from) || !toInt(a[4], to) || rows > 400 || cols > 400) return err("BAD_ARGUMENT", "APPT_LOAD <rows> <cols> <fromCol> <toCol> <n> day:slot ...");
-    if (!itemsAt(a, 5, items, error)) return error;
-    std::vector<std::pair<int, int>> bookings;
-    for (const std::string& it : items) {
-      std::vector<std::string> f = splitOn(it, ':');
-      if (f.size() != 2 || !toInt(f[0], n1) || !toInt(f[1], n2)) return err("BAD_ARGUMENT", "APPT_LOAD item: day:slot");
-      bookings.push_back({static_cast<int>(n1), static_cast<int>(n2)});
-    }
-    LoadReport r;
-    if (!computeAppointmentLoad(static_cast<int>(rows), static_cast<int>(cols), static_cast<int>(from), static_cast<int>(to), bookings, r)) return err("BAD_ARGUMENT", "Booking outside the grid or bad range.");
-    auto cell = [](const LoadCell& c) { return "[" + std::to_string(c.row) + "," + std::to_string(c.col) + "," + std::to_string(c.count) + "]"; };
-    auto num = [](int v) { return std::to_string(v); };
-    std::ostringstream o;
-    o << "{\"ok\":true,\"rows\":" << r.rows << ",\"cols\":" << r.cols << ",\"nonZeros\":" << r.nonZeros << ",\"density\":" << r.density
-      << ",\"bookings\":" << bookings.size() << ",\"cells\":" << arrayJson(r.cells, cell) << ",\"rowSums\":" << arrayJson(r.rowSums, num)
-      << ",\"colSums\":" << arrayJson(r.colSums, num) << ",\"busiest\":" << arrayJson(r.busiest, cell)
-      << ",\"bestSlots\":" << arrayJson(r.bestSlots, [](const BestSlot& b) { return "[" + std::to_string(b.col) + "," + std::to_string(b.count) + "]"; })
-      << ",\"lookupComparisons\":" << r.lookupComparisons << "}";
-    return o.str();
-  }
-  if (cmd == "DOC_READINESS") {
-    long long docs, rounds;
-    if (a.size() < 3 || !toInt(a[1], docs) || !toInt(a[2], rounds) || docs < 1 || rounds < 1 || docs > 100 || rounds > 100) return err("BAD_ARGUMENT", "DOC_READINESS <docs> <rounds> <roundTotal...> <n> doc:round:count ...");
-    const std::size_t countAt = 3 + static_cast<std::size_t>(rounds);
-    std::vector<int> totals;
-    for (long long r = 0; r < rounds; ++r) {
-      if (a.size() <= 3 + static_cast<std::size_t>(r) || !toInt(a[3 + static_cast<std::size_t>(r)], n1) || n1 < 0) return err("BAD_ARGUMENT", "Bad round total.");
-      totals.push_back(static_cast<int>(n1));
-    }
-    if (!itemsAt(a, countAt, items, error)) return error;
-    std::vector<DocCount> cells;
-    for (const std::string& it : items) {
-      std::vector<std::string> f = splitOn(it, ':');
-      long long c;
-      if (f.size() != 3 || !toInt(f[0], n1) || !toInt(f[1], n2) || !toInt(f[2], c)) return err("BAD_ARGUMENT", "DOC_READINESS item: doc:round:count");
-      cells.push_back(DocCount{static_cast<int>(n1), static_cast<int>(n2), static_cast<int>(c)});
-    }
-    ReadinessReport r;
-    if (!computeDocReadiness(static_cast<int>(docs), static_cast<int>(rounds), totals, cells, r)) return err("BAD_ARGUMENT", "Invalid matrix data.");
-    auto num = [](int v) { return std::to_string(v); };
-    auto dbl = [](double v) { char b[32]; std::snprintf(b, sizeof b, "%.1f", v); return std::string(b); };
-    std::ostringstream o;
-    o << "{\"ok\":true,\"docs\":" << r.docs << ",\"rounds\":" << r.rounds << ",\"counts\":" << arrayJson(r.counts, num) << ",\"percent\":" << arrayJson(r.percent, dbl)
-      << ",\"docTotals\":" << arrayJson(r.docTotals, num) << ",\"roundTotals\":" << arrayJson(r.roundTotals, num)
-      << ",\"weakestDoc\":" << arrayJson(r.weakestDoc, num) << ",\"strongestDoc\":" << arrayJson(r.strongestDoc, num) << "}";
-    return o.str();
+  // 1. Search Index commands (INDEX_*, SEARCH_*)
+  if (command == "INDEX_CLEAR" || command == "INDEX_ADD" ||
+      command == "INDEX_TOKENS" || command == "INDEX_BUILD" ||
+      command == "SEARCH_APP" || command == "SEARCH_TOKEN" || command == "SEARCH_NAME") {
+    return handleSearchIndexCommands(tk, command, arguments);
   }
 
-  // ------------------------------------------------------------------ admission progress queue (max-heap)
-  if (cmd == "PROGRESS_CLEAR") {
-    tk.progress.clear();
-    return "{\"ok\":true}";
-  }
-  if (cmd == "PROGRESS_UPSERT") {
-    if (a.size() != 5 || !toInt(a[1], n1) || a[2].empty()) {
-      return err("BAD_ARGUMENT", "PROGRESS_UPSERT <studentId> <token> <score> <enteredAt>");
-    }
-    double score = 0.0;
-    if (!toDouble(a[3], score)) {
-      return err("BAD_ARGUMENT", "Invalid score value.");
-    }
-    tk.progress.upsert(n1, a[2], score, decodeName(a[4]));
-    return "{\"ok\":true,\"studentId\":" + std::to_string(n1) + ",\"size\":" + std::to_string(tk.progress.size()) + "}";
-  }
-  if (cmd == "PROGRESS_REMOVE") {
-    if (a.size() != 2 || !toInt(a[1], n1)) {
-      return err("BAD_ARGUMENT", "PROGRESS_REMOVE <studentId>");
-    }
-    const bool removed = tk.progress.remove(n1);
-    return "{\"ok\":true,\"studentId\":" + std::to_string(n1) + ",\"removed\":" + (removed ? "true" : "false") + ",\"size\":" + std::to_string(tk.progress.size()) + "}";
-  }
-  if (cmd == "PROGRESS_LOAD") {
-    if (!itemsAt(a, 1, items, error)) return error;
-    for (const std::string& it : items) {
-      std::vector<std::string> f = splitOn(it, '|');
-      if (f.size() != 4 || !toInt(f[0], n1) || f[1].empty()) {
-        return err("BAD_ARGUMENT", "PROGRESS_LOAD item: studentId|token|score|enteredAt");
-      }
-      double score = 0.0;
-      if (!toDouble(f[2], score)) {
-        return err("BAD_ARGUMENT", "Invalid score in PROGRESS_LOAD item.");
-      }
-      tk.progress.upsert(n1, f[1], score, decodeName(f[3]));
-    }
-    return "{\"ok\":true,\"loaded\":" + std::to_string(items.size()) + ",\"size\":" + std::to_string(tk.progress.size()) + "}";
-  }
-  if (cmd == "PROGRESS_PEEK") {
-    const ProgressStudent* top = tk.progress.peek();
-    if (top == nullptr) {
-      return "{\"ok\":true,\"hasStudent\":false}";
-    }
-    char scoreBuf[32];
-    std::snprintf(scoreBuf, sizeof scoreBuf, "%.4f", top->score);
-    return "{\"ok\":true,\"hasStudent\":true,\"student\":{\"studentId\":" + std::to_string(top->studentId)
-      + ",\"token\":\"" + jsonEscape(top->token) + "\""
-      + ",\"score\":" + scoreBuf
-      + ",\"enteredAt\":\"" + jsonEscape(top->enteredAt) + "\"}}";
-  }
-  if (cmd == "PROGRESS_SIZE") {
-    return "{\"ok\":true,\"size\":" + std::to_string(tk.progress.size()) + "}";
-  }
-  if (cmd == "PROGRESS_RANK") {
-    std::vector<ProgressStudent> ranked = tk.progress.getRanked();
-    std::ostringstream o;
-    o << "{\"ok\":true,\"size\":" << ranked.size() << ",\"ranked\":[";
-    for (std::size_t i = 0; i < ranked.size(); ++i) {
-      if (i > 0) o << ",";
-      char scoreBuf[32];
-      std::snprintf(scoreBuf, sizeof scoreBuf, "%.4f", ranked[i].score);
-      o << "{\"position\":" << (i + 1)
-        << ",\"studentId\":" << ranked[i].studentId
-        << ",\"token\":\"" << jsonEscape(ranked[i].token) << "\""
-        << ",\"score\":" + std::string(scoreBuf)
-        << ",\"enteredAt\":\"" << jsonEscape(ranked[i].enteredAt) << "\"}";
-    }
-    o << "]}";
-    return o.str();
+  // 2. Sorting command (SORT)
+  if (command == "SORT") {
+    return handleSortCommand(tk, arguments);
   }
 
-  // everything else is a Phase 4 queue command (or an error), handled exactly as before
+  // 3. Stack commands (STACK_*)
+  if (command == "STACK_PUSH" || command == "STACK_POP" ||
+      command == "STACK_PEEK" || command == "STACK_LIST" ||
+      command == "STACK_CLEAR_ALL") {
+    return handleStackCommand(tk, command, arguments);
+  }
+
+  // 4. Matrix Reports commands (APPT_LOAD, DOC_READINESS)
+  if (command == "APPT_LOAD") {
+    return handleApptLoadCommand(tk, arguments);
+  }
+  if (command == "DOC_READINESS") {
+    return handleDocReadinessCommand(tk, arguments);
+  }
+
+  // 5. Admission Progress Max-Heap commands (PROGRESS_*)
+  if (command == "PROGRESS_CLEAR" || command == "PROGRESS_UPSERT" ||
+      command == "PROGRESS_REMOVE" || command == "PROGRESS_LOAD" ||
+      command == "PROGRESS_PEEK" || command == "PROGRESS_SIZE" ||
+      command == "PROGRESS_RANK") {
+    return handleProgressHeapCommands(tk, command, arguments);
+  }
+
+  // 6. Non-toolkit commands belong to the Phase 4 Queue Engine
   return handleLine(tk.queue, line, quit);
 }
 
